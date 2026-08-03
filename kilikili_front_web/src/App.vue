@@ -20,6 +20,7 @@ type Video = {
 };
 type HistoryVideo = Video & { watchedAt: string };
 type FavoriteVideo = Video & { favoritedAt: string };
+type Follower = { id: number; nickname: string; avatar?: string | null; followedAt: string };
 type Comment = { id: number; content: string; nickname: string; parentId?: number | null; createdAt?: string; avatar?: string | null };
 type Danmaku = { id: number; content: string; mode: "SCROLL" | "TOP" | "BOTTOM"; color: string; timeMs: number };
 type NotificationItem = {
@@ -88,6 +89,8 @@ const favoriteVideos = ref<FavoriteVideo[]>([]);
 const favoriteLoading = ref(false);
 const selectedFavorited = ref(false);
 const selectedFollowing = ref(false);
+const fans = ref<Follower[]>([]);
+const fansLoading = ref(false);
 const notifications = ref<NotificationItem[]>([]);
 const notificationLoading = ref(false);
 const notificationTab = ref<"ALL" | NotificationItem["type"]>("ALL");
@@ -276,6 +279,7 @@ async function submitAuth() {
       if (activePage.value === "history") loadHistory();
       if (activePage.value === "favorite") loadFavorites();
       if (activePage.value === "message") loadNotifications();
+      if (activePage.value === "fans") loadFans();
     } else {
       await axios.post("/api/auth/register", auth.value);
       notice.value = "注册成功，请登录";
@@ -290,6 +294,7 @@ function logout() {
   user.value = null;
   historyVideos.value = [];
   favoriteVideos.value = [];
+  fans.value = [];
   notifications.value = [];
   localStorage.removeItem("kilikili_token");
   localStorage.removeItem("kilikili_user");
@@ -421,6 +426,23 @@ async function loadNotifications() {
     fail(error);
   } finally {
     notificationLoading.value = false;
+  }
+}
+async function loadFans() {
+  if (!loggedIn.value) {
+    fans.value = [];
+    return;
+  }
+  fansLoading.value = true;
+  try {
+    fans.value = (await axios.get("/api/users/me/followers", {
+      headers: authHeaders(),
+      params: { page: 1, pageSize: 50 },
+    })).data.data.items;
+  } catch (error) {
+    fail(error);
+  } finally {
+    fansLoading.value = false;
   }
 }
 function selectNotificationTab(tab: "ALL" | NotificationItem["type"]) {
@@ -612,7 +634,7 @@ function navigate(page: Page) {
   activePage.value = page;
   selected.value = null;
   if (
-    (page === "create" || page === "settings" || page === "history" || page === "favorite" || page === "message") &&
+    (page === "create" || page === "settings" || page === "history" || page === "favorite" || page === "message" || page === "fans") &&
     !loggedIn.value
   )
     openAuth();
@@ -620,6 +642,7 @@ function navigate(page: Page) {
   if (page === "history" && loggedIn.value) loadHistory();
   if (page === "favorite" && loggedIn.value) loadFavorites();
   if (page === "message" && loggedIn.value) loadNotifications();
+  if (page === "fans" && loggedIn.value) loadFans();
   if (page === "create" && loggedIn.value) {
     loadCreatorVideos();
     loadCreatorStats();
@@ -1485,8 +1508,19 @@ onBeforeUnmount(stopDanmakuRender);
             </section>
             <div v-else class="favorite-empty"><span>☆</span><p>还没有收藏视频</p><button @click="navigate('recommend')">去发现喜欢的视频</button></div>
           </section>
-          <section v-else-if="activePage === 'fans'" class="fan-grid">
-            <article class="fan-card empty-fans">
+          <section v-else-if="activePage === 'fans' && loggedIn" class="fans-page">
+            <p v-if="fansLoading" class="load-status">正在加载粉丝列表…</p>
+            <div v-else-if="fans.length" class="fan-grid">
+              <article v-for="fan in fans" :key="fan.id" class="fan-card fan-member">
+                <div class="fan-avatar">
+                  <img v-if="fan.avatar" :src="fan.avatar" :alt="fan.nickname" />
+                  <span v-else>{{ fan.nickname.slice(0, 1).toUpperCase() }}</span>
+                </div>
+                <b>{{ fan.nickname }}</b>
+                <small>关注于 {{ formatHistoryTime(fan.followedAt) }}</small>
+              </article>
+            </div>
+            <article v-else class="fan-card empty-fans">
               <div class="avatar fan-avatar">K</div>
               <b>还没有粉丝</b><small>发布优质内容，等待第一位粉丝吧</small>
             </article>

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -36,5 +37,13 @@ public class FollowController {
     @GetMapping("/{id}/follow-status")
     public ApiResponse<Map<String, Object>> status(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
         return ApiResponse.ok(Map.of("following", followService.isFollowing(authService.requireUserId(authorization), id)));
+    }
+
+    @Operation(summary = "获取我的粉丝列表")
+    @GetMapping("/me/followers")
+    public ApiResponse<Map<String, Object>> followers(@RequestHeader("Authorization") String authorization,
+                                                       @RequestParam(defaultValue = "1") int page,
+                                                       @RequestParam(defaultValue = "20") int pageSize) {
+        return ApiResponse.ok(followService.followers(authService.requireUserId(authorization), Math.max(1, page), Math.min(Math.max(1, pageSize), 50)));
     }
 }

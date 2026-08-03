@@ -204,3 +204,11 @@
 .dark .notification-item:hover { background: #242936; }
 .dark .notification-body p, .dark .notification-body small { color: #aeb9c9; }
 @media (max-width: 760px) { .notification-tabs { gap: 19px; overflow-x: auto; } .notification-item { padding-right: 12px; } }
+
+.fans-page { width: min(100%, 1220px); }
+.fan-member { min-height: 205px; cursor: default; transition: transform .2s, box-shadow .2s; }
+.fan-member:hover { transform: translateY(-2px); box-shadow: 0 9px 24px #232d4512; }
+.fan-avatar { overflow: hidden; }
+.fan-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.fan-member b { max-width: 100%; overflow: hidden; color: #26354a; text-overflow: ellipsis; white-space: nowrap; }
+.dark .fan-member b { color: #edf2fb; }
