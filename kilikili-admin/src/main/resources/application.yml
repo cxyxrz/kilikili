@@ -1,0 +1,30 @@
+server:
+  port: 7070
+spring:
+  application:
+    name: kilikili-admin
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/kilikili?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  sql:
+    init:
+      mode: never
+
+kilikili:
+  storage:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket: ${MINIO_BUCKET:kilikili}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

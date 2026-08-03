@@ -1,0 +1,46 @@
+spring:
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/kilikili?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  servlet:
+    multipart:
+      max-file-size: ${MAX_VIDEO_SIZE:16GB}
+      max-request-size: ${MAX_VIDEO_SIZE:16GB}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+logging:
+  config: classpath:logback-spring.xml
+  level:
+    com.kilikili: ${KILIKILI_LOG_LEVEL:INFO}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
+kilikili:
+  storage:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket: ${MINIO_BUCKET:kilikili}
+  ai:
+    deepseek-api-key: ${DEEPSEEK_API_KEY:}
+  auth:
+    session-ttl-days: 7

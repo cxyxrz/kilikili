@@ -1,0 +1,16 @@
+# Backend
+**/target/
+*.log
+logs/
+
+# Frontend
+**/node_modules/
+**/dist/
+*.tsbuildinfo
+
+# Local configuration and IDE
+.idea/
+*.iml
+.env.local
+data/
+.mvn/repository/
