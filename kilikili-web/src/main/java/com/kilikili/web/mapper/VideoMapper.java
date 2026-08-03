@@ -12,7 +12,7 @@ import java.util.List;
 
 @Mapper
 public interface VideoMapper {
-    String VIDEO_COLUMNS = "v.id, v.author_id, v.title, v.description, v.object_key, v.cover_url, v.cover_object_key, v.category_id, v.duration_seconds, v.creation_declaration, v.status, v.view_count, v.like_count, v.comment_count, v.created_at, a.nickname AS author_name ";
+    String VIDEO_COLUMNS = "v.id, v.author_id, v.title, v.description, v.object_key, v.cover_url, v.cover_object_key, v.category_id, v.duration_seconds, v.creation_declaration, v.status, v.view_count, v.like_count, v.comment_count, v.created_at, a.nickname AS author_name, a.avatar AS author_avatar ";
 
     @ConstructorArgs({
             @Arg(column = "id", javaType = Long.class),
@@ -30,7 +30,8 @@ public interface VideoMapper {
             @Arg(column = "like_count", javaType = Long.class),
             @Arg(column = "comment_count", javaType = Long.class),
             @Arg(column = "created_at", javaType = java.time.LocalDateTime.class),
-            @Arg(column = "author_name", javaType = String.class)
+            @Arg(column = "author_name", javaType = String.class),
+            @Arg(column = "author_avatar", javaType = String.class)
     })
     @Select("SELECT " + VIDEO_COLUMNS + "FROM video v JOIN account a ON a.id=v.author_id WHERE v.id=#{id}")
     Video findById(long id);
@@ -51,7 +52,8 @@ public interface VideoMapper {
             @Arg(column = "like_count", javaType = Long.class),
             @Arg(column = "comment_count", javaType = Long.class),
             @Arg(column = "created_at", javaType = java.time.LocalDateTime.class),
-            @Arg(column = "author_name", javaType = String.class)
+            @Arg(column = "author_name", javaType = String.class),
+            @Arg(column = "author_avatar", javaType = String.class)
     })
     @Select("SELECT " + VIDEO_COLUMNS + "FROM video v JOIN account a ON a.id=v.author_id WHERE v.status='PUBLISHED' ORDER BY v.created_at DESC LIMIT #{limit}")
     List<Video> listPublished(int limit);

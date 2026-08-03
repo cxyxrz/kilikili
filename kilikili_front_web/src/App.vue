@@ -5,9 +5,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 type User = { id: number; username: string; nickname: string };
 type Video = {
   id: number;
+  authorId?: number;
   title: string;
   description?: string;
   authorName: string;
+  authorAvatar?: string | null;
   coverUrl?: string | null;
   durationSeconds?: number;
   likeCount: number;
@@ -85,6 +87,7 @@ const historyLoading = ref(false);
 const favoriteVideos = ref<FavoriteVideo[]>([]);
 const favoriteLoading = ref(false);
 const selectedFavorited = ref(false);
+const selectedFollowing = ref(false);
 const notifications = ref<NotificationItem[]>([]);
 const notificationLoading = ref(false);
 const notificationTab = ref<"ALL" | NotificationItem["type"]>("ALL");
@@ -161,6 +164,7 @@ const filteredVideos = computed(() =>
 const relatedVideos = computed(() =>
   videos.value.filter((video) => video.id !== selected.value?.id).slice(0, 8),
 );
+const isFollowingSelected = computed(() => selected.value?.authorId != null && selectedFollowing.value);
 const sortedComments = computed(() => {
   const items = [...comments.value];
   return commentSort.value === "latest"
@@ -227,6 +231,20 @@ function formatDuration(seconds = 0) {
 }
 function formatCount(value = 0) {
   return value >= 10000 ? `${(value / 10000).toFixed(1)}万` : value;
+}
+async function toggleAuthorFollow() {
+  if (!selected.value?.authorId) return;
+  if (!loggedIn.value) {
+    openAuth();
+    return;
+  }
+  try {
+    const data = (await axios.post(`/api/users/${selected.value.authorId}/follow`, {}, { headers: authHeaders() })).data.data;
+    selectedFollowing.value = data.following;
+    notice.value = data.following ? "已关注 UP 主" : "已取消关注";
+  } catch (error) {
+    fail(error);
+  }
 }
 function formatDate(value: string) {
   return value ? value.replace("T", " ").slice(0, 16) : "-";
@@ -653,6 +671,7 @@ async function openVideo(video: Video) {
   try {
     selected.value = video;
     selectedFavorited.value = false;
+    selectedFollowing.value = false;
     const response = (await axios.get(`/api/videos/${video.id}`)).data.data;
     selected.value = { ...video, ...response.video };
     playUrl.value = response.playUrl;
@@ -668,6 +687,10 @@ async function openVideo(video: Video) {
         .post(`/api/videos/${video.id}/history`, {}, { headers: authHeaders() })
         .catch(() => undefined);
       selectedFavorited.value = (await axios.get(`/api/videos/${video.id}/favorite-status`, { headers: authHeaders() })).data.data.favorited;
+      const authorId = selected.value?.authorId;
+      if (authorId) {
+        selectedFollowing.value = (await axios.get(`/api/users/${authorId}/follow-status`, { headers: authHeaders() })).data.data.following;
+      }
     }
   } catch (error) {
     fail(error);
@@ -913,6 +936,22 @@ onBeforeUnmount(stopDanmakuRender);
               </section>
             </div>
             <aside class="related-section">
+              <section class="up-info-card">
+                <div class="up-info-head">
+                  <div class="up-avatar">
+                    <img v-if="selected.authorAvatar" :src="selected.authorAvatar" :alt="selected.authorName" />
+                    <span v-else>{{ selected.authorName.slice(0, 1).toUpperCase() }}</span>
+                  </div>
+                  <div class="up-info-name">
+                    <h2>{{ selected.authorName }}</h2>
+                    <p>{{ formatCount(selected.likeCount) }} 获赞 · {{ formatCount(selected.viewCount) }} 播放</p>
+                  </div>
+                  <button class="follow-button" :class="{ followed: isFollowingSelected }" @click="toggleAuthorFollow">
+                    {{ isFollowingSelected ? "✓ 已关注" : "+ 关注" }}
+                  </button>
+                </div>
+                <p class="up-video-summary">发布了这条视频 · {{ formatCount(selected.commentCount) }} 条互动</p>
+              </section>
               <h2>相关推荐</h2>
               <div class="related-list">
                 <article

@@ -24,10 +24,10 @@ public interface NotificationMapper {
             @Arg(column="read_at", javaType=java.time.LocalDateTime.class), @Arg(column="created_at", javaType=java.time.LocalDateTime.class),
             @Arg(column="actor_name", javaType=String.class), @Arg(column="actor_avatar", javaType=String.class)
     })
-    @Select("<script>SELECT n.id,n.type,n.content,n.video_id,n.read_at,n.created_at,a.nickname AS actor_name,a.avatar AS actor_avatar FROM user_notification n JOIN account a ON a.id=n.actor_id <where>n.recipient_id=#{recipientId}<if test='type != null and type != \"\"'>AND n.type=#{type}</if></where> ORDER BY n.created_at DESC LIMIT #{limit} OFFSET #{offset}</script>")
+    @Select("<script>SELECT n.id,n.type,n.content,n.video_id,n.read_at,n.created_at,a.nickname AS actor_name,a.avatar AS actor_avatar FROM user_notification n JOIN account a ON a.id=n.actor_id <where>n.recipient_id=#{recipientId} <if test='type != null and type != \"\"'>AND n.type=#{type}</if></where> ORDER BY n.created_at DESC LIMIT #{limit} OFFSET #{offset}</script>")
     List<NotificationSource> list(@Param("recipientId") long recipientId, @Param("type") String type, @Param("limit") int limit, @Param("offset") int offset);
 
-    @Select("<script>SELECT COUNT(*) FROM user_notification <where>recipient_id=#{recipientId}<if test='type != null and type != \"\"'>AND type=#{type}</if></where></script>")
+    @Select("<script>SELECT COUNT(*) FROM user_notification <where>recipient_id=#{recipientId} <if test='type != null and type != \"\"'>AND type=#{type}</if></where></script>")
     long count(@Param("recipientId") long recipientId, @Param("type") String type);
 
     @Update("UPDATE user_notification SET read_at=CURRENT_TIMESTAMP WHERE recipient_id=#{recipientId} AND read_at IS NULL")

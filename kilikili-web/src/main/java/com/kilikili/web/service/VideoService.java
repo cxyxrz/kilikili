@@ -48,14 +48,14 @@ public class VideoService {
         return Map.of("message", "上传成功，正在等待审核", "status", "PENDING_REVIEW");
     }
 
-    public List<Video> list() { return videoMapper.listPublished(30); }
+    public List<Video> list() { return videoMapper.listPublished(30).stream().map(this::displayVideo).toList(); }
 
     public Map<String, Object> detail(long id) {
         Video video = requireVideo(id);
         if (!"PUBLISHED".equals(video.status())) throw new BusinessException("视频暂不可播放");
         videoMapper.increaseViews(id);
         log.info("视频开始播放: videoId={}, authorId={}", id, video.authorId());
-        return Map.of("video", video, "playUrl", storageService.presignedReadUrl(video.objectKey()));
+        return Map.of("video", displayVideo(video), "playUrl", storageService.presignedReadUrl(video.objectKey()));
     }
 
     @Transactional
@@ -178,6 +178,13 @@ public class VideoService {
         log.info("视频弹幕已发布: userId={}, videoId={}, mode={}, timeMs={}", userId, videoId, mode, timeMs);
     }
 
+    private Video displayVideo(Video video) {
+        String authorAvatar = video.authorAvatar() == null || video.authorAvatar().isBlank()
+                ? null : storageService.presignedReadUrl(video.authorAvatar());
+        return new Video(video.id(), video.authorId(), video.title(), video.description(), video.objectKey(), video.coverUrl(),
+                video.coverObjectKey(), video.categoryId(), video.durationSeconds(), video.creationDeclaration(), video.status(),
+                video.viewCount(), video.likeCount(), video.commentCount(), video.createdAt(), video.authorName(), authorAvatar);
+    }
     private String historyCoverUrl(HistoryVideoSource source) {
         return source.coverObjectKey() == null || source.coverObjectKey().isBlank()
                 ? source.coverUrl() : storageService.presignedReadUrl(source.coverObjectKey());

@@ -72,6 +72,14 @@ CREATE TABLE IF NOT EXISTS video_favorite (
   INDEX idx_favorite_user_created (user_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS user_follow (
+  follower_id BIGINT NOT NULL,
+  following_id BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (follower_id, following_id),
+  INDEX idx_follow_following_created (following_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS video_comment (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   video_id BIGINT NOT NULL,
