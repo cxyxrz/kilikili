@@ -212,3 +212,5 @@
 .fan-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .fan-member b { max-width: 100%; overflow: hidden; color: #26354a; text-overflow: ellipsis; white-space: nowrap; }
 .dark .fan-member b { color: #edf2fb; }
+.nav-monitor-icon, .nav-create-icon, .nav-search-icon, .nav-history-icon, .nav-following-icon, .nav-fans-icon, .nav-settings-icon { display: inline-grid; place-items: center; }
+.nav-monitor-icon svg, .nav-create-icon svg, .nav-search-icon svg, .nav-history-icon svg, .nav-following-icon svg, .nav-fans-icon svg, .nav-settings-icon svg { width: 25px; height: 25px; }

@@ -797,8 +797,50 @@ onBeforeUnmount(stopDanmakuRender);
           :title="item.label"
           @click="navigate(item.key)"
         >
-          <span class="nav-icon">{{ item.icon }}</span
-          ><span class="nav-label">{{ item.label }}</span>
+          <span v-if="item.key === 'recommend'" class="nav-icon nav-monitor-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2.5" y="3.5" width="19" height="13.5" rx="1.7" />
+              <path d="M8.5 21h7M12 17v4" />
+            </svg>
+          </span>
+          <span v-else-if="item.key === 'create'" class="nav-icon nav-create-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13.5 5H4.5A1.5 1.5 0 0 0 3 6.5v13A1.5 1.5 0 0 0 4.5 21h13a1.5 1.5 0 0 0 1.5-1.5v-8" />
+              <path d="m18.2 3.8 2 2-8.8 8.8-3.3 1.3 1.3-3.3 8.8-8.8Z" />
+            </svg>
+          </span>
+          <span v-else-if="item.key === 'search'" class="nav-icon nav-search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+              <circle cx="10.8" cy="10.8" r="7.5" />
+              <path d="m16.4 16.4 4.2 4.2" />
+            </svg>
+          </span>
+          <span v-else-if="item.key === 'history'" class="nav-icon nav-history-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3.5 2" />
+            </svg>
+          </span>
+          <span v-else-if="item.key === 'following'" class="nav-icon nav-following-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="7.5" r="4" />
+              <path d="M4.5 21v-2.1c0-3.1 2.8-5.4 7.5-5.4s7.5 2.3 7.5 5.4V21" />
+            </svg>
+          </span>
+          <span v-else-if="item.key === 'fans'" class="nav-icon nav-fans-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="7.2" r="4.4" />
+              <path d="M4.1 21v-1.4c0-3.55 3.35-6.15 7.9-6.15s7.9 2.6 7.9 6.15V21H4.1Z" />
+            </svg>
+          </span>
+          <span v-else-if="item.key === 'settings'" class="nav-icon nav-settings-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </span>
+          <span v-else class="nav-icon">{{ item.icon }}</span>
+          <span class="nav-label">{{ item.label }}</span>
         </button>
       </nav>
       <div class="account-area">
