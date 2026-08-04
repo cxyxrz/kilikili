@@ -37,6 +37,12 @@ public class NotificationController {
         return ApiResponse.ok(notificationService.list(authService.requireUserId(authorization), type, Math.max(1, page), Math.min(Math.max(1, pageSize), 50)));
     }
 
+    @Operation(summary = "获取未读消息数量")
+    @GetMapping("/unread-count")
+    public ApiResponse<Map<String, Long>> unreadCount(@RequestHeader("Authorization") String authorization) {
+        return ApiResponse.ok(Map.of("count", notificationService.unreadCount(authService.requireUserId(authorization))));
+    }
+
     @Operation(summary = "全部消息标记已读")
     @PostMapping("/read-all")
     public ApiResponse<Void> markAllRead(@RequestHeader("Authorization") String authorization) {

@@ -98,6 +98,7 @@ const followingLoading = ref(false);
 const notifications = ref<NotificationItem[]>([]);
 const notificationLoading = ref(false);
 const notificationTab = ref<"ALL" | NotificationItem["type"]>("ALL");
+const unreadNotificationCount = ref(0);
 const selected = ref<Video | null>(null);
 const playUrl = ref("");
 const comments = ref<Comment[]>([]);
@@ -140,6 +141,7 @@ const videoPlayer = ref<HTMLVideoElement | null>(null);
 const danmakuCanvas = ref<HTMLCanvasElement | null>(null);
 let danmakuFrame = 0;
 let searchTimer = 0;
+let notificationPoll = 0;
 
 const navItems: { key: Page; label: string; icon: string }[] = [
   { key: "recommend", label: "推荐", icon: "▣" },
@@ -304,6 +306,8 @@ async function submitAuth() {
       if (activePage.value === "history") loadHistory();
       if (activePage.value === "favorite") loadFavorites();
       if (activePage.value === "message") loadNotifications();
+      loadUnreadNotificationCount();
+      if (!notificationPoll) notificationPoll = window.setInterval(loadUnreadNotificationCount, 30000);
       if (activePage.value === "fans") loadFans();
       if (activePage.value === "following") loadFollowingVideos();
     } else {
@@ -323,6 +327,9 @@ function logout() {
   fans.value = [];
   followingVideos.value = [];
   notifications.value = [];
+  unreadNotificationCount.value = 0;
+  window.clearInterval(notificationPoll);
+  notificationPoll = 0;
   localStorage.removeItem("kilikili_token");
   localStorage.removeItem("kilikili_user");
   notice.value = "已退出登录";
@@ -455,6 +462,19 @@ async function loadNotifications() {
     notificationLoading.value = false;
   }
 }
+async function loadUnreadNotificationCount() {
+  if (!loggedIn.value) {
+    unreadNotificationCount.value = 0;
+    return;
+  }
+  try {
+    unreadNotificationCount.value = (await axios.get("/api/notifications/unread-count", {
+      headers: authHeaders(),
+    })).data.data.count;
+  } catch {
+    // The notification badge should not interrupt normal page use when the server is unavailable.
+  }
+}
 async function loadFans() {
   if (!loggedIn.value) {
     fans.value = [];
@@ -501,15 +521,18 @@ async function markAllNotificationsRead() {
       ...item,
       readAt: item.readAt || new Date().toISOString(),
     }));
+    unreadNotificationCount.value = 0;
     notice.value = "全部消息已读";
   } catch (error) {
     fail(error);
   }
 }
 async function deleteNotification(id: number) {
+  const target = notifications.value.find((item) => item.id === id);
   try {
     await axios.delete(`/api/notifications/${id}`, { headers: authHeaders() });
     notifications.value = notifications.value.filter((item) => item.id !== id);
+    if (target && !target.readAt) unreadNotificationCount.value = Math.max(0, unreadNotificationCount.value - 1);
   } catch (error) {
     fail(error);
   }
@@ -686,6 +709,7 @@ function navigate(page: Page) {
   if (page === "history" && loggedIn.value) loadHistory();
   if (page === "favorite" && loggedIn.value) loadFavorites();
   if (page === "message" && loggedIn.value) loadNotifications();
+  if (page === "message" && loggedIn.value) loadUnreadNotificationCount();
   if (page === "fans" && loggedIn.value) loadFans();
   if (page === "following" && loggedIn.value) loadFollowingVideos();
   if (page === "recommend") loadVideos();
@@ -825,9 +849,16 @@ async function sendReply() {
 onMounted(() => {
   loadCategories();
   loadVideos();
-  if (loggedIn.value) loadProfile();
+  if (loggedIn.value) {
+    loadProfile();
+    loadUnreadNotificationCount();
+    notificationPoll = window.setInterval(loadUnreadNotificationCount, 30000);
+  }
 });
-onBeforeUnmount(stopDanmakuRender);
+onBeforeUnmount(() => {
+  stopDanmakuRender();
+  window.clearInterval(notificationPoll);
+});
 </script>
 
 <template>
@@ -931,7 +962,7 @@ onBeforeUnmount(stopDanmakuRender);
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
               <path d="M10 21h4" />
-            </svg><i></i>
+            </svg><i v-if="unreadNotificationCount > 0"></i>
           </button
           ><button
             class="avatar profile"

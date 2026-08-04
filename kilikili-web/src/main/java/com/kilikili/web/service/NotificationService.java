@@ -34,6 +34,8 @@ public class NotificationService {
         return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total, "hasMore", (long) page * pageSize < total);
     }
 
+    public long unreadCount(long userId) { return notificationMapper.countUnread(userId); }
+
     @Transactional
     public void markAllRead(long userId) { notificationMapper.markAllRead(userId); }
 

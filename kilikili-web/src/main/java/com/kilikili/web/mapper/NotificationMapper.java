@@ -30,6 +30,9 @@ public interface NotificationMapper {
     @Select("<script>SELECT COUNT(*) FROM user_notification <where>recipient_id=#{recipientId} <if test='type != null and type != \"\"'>AND type=#{type}</if></where></script>")
     long count(@Param("recipientId") long recipientId, @Param("type") String type);
 
+    @Select("SELECT COUNT(*) FROM user_notification WHERE recipient_id=#{recipientId} AND read_at IS NULL")
+    long countUnread(@Param("recipientId") long recipientId);
+
     @Update("UPDATE user_notification SET read_at=CURRENT_TIMESTAMP WHERE recipient_id=#{recipientId} AND read_at IS NULL")
     int markAllRead(@Param("recipientId") long recipientId);
 
