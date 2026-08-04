@@ -93,6 +93,8 @@ const selectedFavorited = ref(false);
 const selectedFollowing = ref(false);
 const fans = ref<Follower[]>([]);
 const fansLoading = ref(false);
+const followingVideos = ref<Video[]>([]);
+const followingLoading = ref(false);
 const notifications = ref<NotificationItem[]>([]);
 const notificationLoading = ref(false);
 const notificationTab = ref<"ALL" | NotificationItem["type"]>("ALL");
@@ -265,6 +267,7 @@ async function toggleAuthorFollow() {
   try {
     const data = (await axios.post(`/api/users/${selected.value.authorId}/follow`, {}, { headers: authHeaders() })).data.data;
     selectedFollowing.value = data.following;
+    if (activePage.value === "following") loadFollowingVideos();
     notice.value = data.following ? "已关注 UP 主" : "已取消关注";
   } catch (error) {
     fail(error);
@@ -302,6 +305,7 @@ async function submitAuth() {
       if (activePage.value === "favorite") loadFavorites();
       if (activePage.value === "message") loadNotifications();
       if (activePage.value === "fans") loadFans();
+      if (activePage.value === "following") loadFollowingVideos();
     } else {
       await axios.post("/api/auth/register", auth.value);
       notice.value = "注册成功，请登录";
@@ -317,6 +321,7 @@ function logout() {
   historyVideos.value = [];
   favoriteVideos.value = [];
   fans.value = [];
+  followingVideos.value = [];
   notifications.value = [];
   localStorage.removeItem("kilikili_token");
   localStorage.removeItem("kilikili_user");
@@ -465,6 +470,23 @@ async function loadFans() {
     fail(error);
   } finally {
     fansLoading.value = false;
+  }
+}
+async function loadFollowingVideos() {
+  if (!loggedIn.value) {
+    followingVideos.value = [];
+    return;
+  }
+  followingLoading.value = true;
+  try {
+    followingVideos.value = (await axios.get("/api/users/me/following/videos", {
+      headers: authHeaders(),
+      params: { page: 1, pageSize: 50 },
+    })).data.data.items;
+  } catch (error) {
+    fail(error);
+  } finally {
+    followingLoading.value = false;
   }
 }
 function selectNotificationTab(tab: "ALL" | NotificationItem["type"]) {
@@ -656,7 +678,7 @@ function navigate(page: Page) {
   activePage.value = page;
   selected.value = null;
   if (
-    (page === "create" || page === "settings" || page === "history" || page === "favorite" || page === "message" || page === "fans") &&
+    (page === "create" || page === "settings" || page === "history" || page === "favorite" || page === "message" || page === "fans" || page === "following") &&
     !loggedIn.value
   )
     openAuth();
@@ -665,6 +687,7 @@ function navigate(page: Page) {
   if (page === "favorite" && loggedIn.value) loadFavorites();
   if (page === "message" && loggedIn.value) loadNotifications();
   if (page === "fans" && loggedIn.value) loadFans();
+  if (page === "following" && loggedIn.value) loadFollowingVideos();
   if (page === "recommend") loadVideos();
   if (page === "search") loadSearchResults();
   if (page === "create" && loggedIn.value) {
@@ -920,7 +943,6 @@ onBeforeUnmount(stopDanmakuRender);
         </div>
       </header>
       <main class="content" @scroll="onContentScroll">
-        <p v-if="notice" class="notice">{{ notice }}</p>
         <template v-if="selected">
           <section class="watch-layout">
             <div class="watch-main">
@@ -1583,6 +1605,18 @@ onBeforeUnmount(stopDanmakuRender);
               </article>
             </section>
             <div v-else class="favorite-empty"><span>☆</span><p>还没有收藏视频</p><button @click="navigate('recommend')">去发现喜欢的视频</button></div>
+          </section>
+          <section v-else-if="activePage === 'following' && loggedIn" class="following-page">
+            <p v-if="followingLoading" class="load-status">正在加载关注动态…</p>
+            <section v-else-if="followingVideos.length" class="video-grid following-grid">
+              <article v-for="video in followingVideos" :key="video.id" class="video-card" @click="openVideo(video)">
+                <div class="video-cover"><img v-if="video.coverUrl" :src="video.coverUrl" :alt="video.title"><span v-else>▶</span><em>{{ formatDuration(video.durationSeconds) }}</em></div>
+                <h3>{{ video.title }}</h3>
+                <p><span class="mini-avatar">{{ video.authorName.slice(0, 1) }}</span>{{ video.authorName }}</p>
+                <small>◉ {{ formatCount(video.viewCount) }}　▣ {{ formatCount(video.commentCount) }}</small>
+              </article>
+            </section>
+            <div v-else class="following-empty"><span>◎</span><p>关注的 UP 主还没有发布视频</p><button @click="navigate('recommend')">去发现更多 UP 主</button></div>
           </section>
           <section v-else-if="activePage === 'fans' && loggedIn" class="fans-page">
             <p v-if="fansLoading" class="load-status">正在加载粉丝列表…</p>

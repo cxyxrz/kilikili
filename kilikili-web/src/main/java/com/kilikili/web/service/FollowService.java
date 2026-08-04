@@ -3,6 +3,7 @@ package com.kilikili.web.service;
 import com.kilikili.common.exception.BusinessException;
 import com.kilikili.common.storage.StorageService;
 import com.kilikili.web.entity.FollowerItem;
+import com.kilikili.web.entity.RecommendItem;
 import com.kilikili.web.mapper.AccountMapper;
 import com.kilikili.web.mapper.FollowMapper;
 import org.springframework.stereotype.Service;
@@ -49,6 +50,18 @@ public class FollowService {
                         ? null : storageService.presignedReadUrl(item.avatar()), item.followedAt()))
                 .toList();
         long total = followMapper.countFollowers(userId);
+        return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total,
+                "hasMore", (long) page * pageSize < total);
+    }
+
+    public Map<String, Object> followingVideos(long userId, int page, int pageSize) {
+        int offset = (page - 1) * pageSize;
+        List<RecommendItem> items = followMapper.listFollowingVideos(userId, pageSize, offset).stream()
+                .map(item -> new RecommendItem(item.id(), item.title(), item.authorName(),
+                        item.coverObjectKey() == null || item.coverObjectKey().isBlank() ? null : storageService.presignedReadUrl(item.coverObjectKey()),
+                        item.durationSeconds(), item.viewCount(), item.likeCount(), item.commentCount(), item.categoryId()))
+                .toList();
+        long total = followMapper.countFollowingVideos(userId);
         return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total,
                 "hasMore", (long) page * pageSize < total);
     }
