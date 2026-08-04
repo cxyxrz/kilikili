@@ -26,4 +26,9 @@ public class RecommendationController {
         int safePage = Math.max(1, page); int safeSize = Math.min(Math.max(1, pageSize), 40);
         return ApiResponse.ok(recommendationService.recommend(categoryId, safePage, safeSize));
     }
+    @Operation(summary = "搜索视频和 UP 主") @GetMapping("/search")
+    public ApiResponse<Map<String, Object>> search(@RequestParam String keyword, @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize) {
+        int safePage = Math.max(1, page); int safeSize = Math.min(Math.max(1, pageSize), 40);
+        return ApiResponse.ok(recommendationService.search(keyword, safePage, safeSize));
+    }
 }

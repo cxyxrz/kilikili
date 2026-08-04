@@ -73,6 +73,8 @@ const sidebarCollapsed = ref(false);
 const dark = ref(false);
 const query = ref("");
 const videos = ref<Video[]>([]);
+const searchResults = ref<Video[]>([]);
+const searchLoading = ref(false);
 const categories = ref<Category[]>([]);
 const selectedCategory = ref(0);
 const recommendPage = ref(1);
@@ -135,6 +137,7 @@ const isDraggingVideo = ref(false);
 const videoPlayer = ref<HTMLVideoElement | null>(null);
 const danmakuCanvas = ref<HTMLCanvasElement | null>(null);
 let danmakuFrame = 0;
+let searchTimer = 0;
 
 const navItems: { key: Page; label: string; icon: string }[] = [
   { key: "recommend", label: "推荐", icon: "▣" },
@@ -159,11 +162,7 @@ const pageTitle: Record<Page, string> = {
   settings: "账号设置",
 };
 const loggedIn = computed(() => Boolean(token.value));
-const filteredVideos = computed(() =>
-  videos.value.filter((video) =>
-    video.title.toLowerCase().includes(query.value.trim().toLowerCase()),
-  ),
-);
+const displayedVideos = computed(() => activePage.value === "search" ? searchResults.value : videos.value);
 const relatedVideos = computed(() =>
   videos.value.filter((video) => video.id !== selected.value?.id).slice(0, 8),
 );
@@ -214,6 +213,28 @@ async function loadVideos(reset = true) {
   } finally {
     recommendLoading.value = false;
   }
+}
+async function loadSearchResults() {
+  const keyword = query.value.trim();
+  if (!keyword) {
+    searchResults.value = [];
+    return;
+  }
+  searchLoading.value = true;
+  try {
+    searchResults.value = (await axios.get("/api/search", {
+      params: { keyword, page: 1, pageSize: 40 },
+    })).data.data.items;
+  } catch (error) {
+    fail(error);
+  } finally {
+    searchLoading.value = false;
+  }
+}
+function scheduleSearch() {
+  activePage.value = "search";
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(loadSearchResults, 260);
 }
 function selectCategory(categoryId: number) {
   selectedCategory.value = categoryId;
@@ -274,6 +295,7 @@ async function submitAuth() {
       user.value = response.user;
       localStorage.setItem("kilikili_token", token.value);
       localStorage.setItem("kilikili_user", JSON.stringify(user.value));
+      loadProfile();
       notice.value = "登录成功";
       authVisible.value = false;
       if (activePage.value === "history") loadHistory();
@@ -643,6 +665,8 @@ function navigate(page: Page) {
   if (page === "favorite" && loggedIn.value) loadFavorites();
   if (page === "message" && loggedIn.value) loadNotifications();
   if (page === "fans" && loggedIn.value) loadFans();
+  if (page === "recommend") loadVideos();
+  if (page === "search") loadSearchResults();
   if (page === "create" && loggedIn.value) {
     loadCreatorVideos();
     loadCreatorStats();
@@ -778,6 +802,7 @@ async function sendReply() {
 onMounted(() => {
   loadCategories();
   loadVideos();
+  if (loggedIn.value) loadProfile();
 });
 onBeforeUnmount(stopDanmakuRender);
 </script>
@@ -872,17 +897,25 @@ onBeforeUnmount(stopDanmakuRender);
           ><input
             v-model="query"
             placeholder="搜索视频、UP主..."
-            @focus="activePage = 'search'"
+            @focus="navigate('search')"
+            @input="scheduleSearch"
+            @keyup.enter="loadSearchResults"
           /><span class="mic">♩</span></label
         >
         <div class="top-actions">
           <button title="切换主题" @click="dark = !dark">☾</button
-          ><button class="bell" title="通知">♧<i></i></button
+          ><button class="bell" title="通知" @click="navigate('message')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+              <path d="M10 21h4" />
+            </svg><i></i>
+          </button
           ><button
             class="avatar profile"
             @click="loggedIn ? navigate('settings') : openAuth()"
           >
-            {{ avatarText }}
+            <img v-if="loggedIn && profile.avatar" :src="profile.avatar" alt="我的头像" />
+            <span v-else>{{ avatarText }}</span>
           </button>
         </div>
       </header>
@@ -1418,7 +1451,7 @@ onBeforeUnmount(stopDanmakuRender);
             </div>
             <section class="video-grid">
               <article
-                v-for="video in filteredVideos"
+                v-for="video in displayedVideos"
                 :key="video.id"
                 class="video-card"
                 @click="openVideo(video)"
@@ -1444,13 +1477,14 @@ onBeforeUnmount(stopDanmakuRender);
                 >
               </article>
               <p
-                v-if="!filteredVideos.length && !recommendLoading"
+                v-if="!displayedVideos.length && !(activePage === 'recommend' ? recommendLoading : searchLoading)"
                 class="empty"
               >
-                暂时没有可展示的视频
+                {{ activePage === 'search' && !query.trim() ? '请输入视频标题或 UP 主昵称开始搜索' : '暂时没有匹配的视频' }}
               </p>
             </section>
-            <p v-if="recommendLoading" class="load-status">正在加载推荐内容…</p>
+            <p v-if="activePage === 'recommend' && recommendLoading" class="load-status">正在加载推荐内容…</p>
+            <p v-if="activePage === 'search' && searchLoading" class="load-status">正在搜索…</p>
             <p
               v-else-if="
                 activePage === 'recommend' && !hasMore && videos.length

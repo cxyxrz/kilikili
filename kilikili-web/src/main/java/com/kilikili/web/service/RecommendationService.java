@@ -41,6 +41,18 @@ public class RecommendationService {
                 source.durationSeconds(), source.viewCount(), source.likeCount(), source.commentCount(), source.categoryId())).toList();
         return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total, "hasMore", (long) page * pageSize < total);
     }
+    public Map<String, Object> search(String keyword, int page, int pageSize) {
+        String normalizedKeyword = keyword == null ? "" : keyword.trim();
+        if (normalizedKeyword.isEmpty()) return Map.of("items", List.of(), "page", page, "pageSize", pageSize, "total", 0L, "hasMore", false);
+        int offset = (page - 1) * pageSize;
+        List<RecommendItem> items = recommendationMapper.search(normalizedKeyword, pageSize, offset).stream()
+                .map(source -> new RecommendItem(source.id(), source.title(), source.authorName(),
+                        source.coverObjectKey() == null || source.coverObjectKey().isBlank() ? null : storageService.presignedReadUrl(source.coverObjectKey()),
+                        source.durationSeconds(), source.viewCount(), source.likeCount(), source.commentCount(), source.categoryId()))
+                .toList();
+        long total = recommendationMapper.countSearch(normalizedKeyword);
+        return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total, "hasMore", (long) page * pageSize < total);
+    }
     private List<RecommendSource> readCache(String key) {
         try {
             String cached = redisTemplate.opsForValue().get(key);

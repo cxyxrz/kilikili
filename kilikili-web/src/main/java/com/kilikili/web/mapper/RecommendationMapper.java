@@ -15,6 +15,13 @@ public interface RecommendationMapper {
     @ConstructorArgs({@Arg(column="id", javaType=Long.class), @Arg(column="title", javaType=String.class), @Arg(column="author_name", javaType=String.class), @Arg(column="cover_object_key", javaType=String.class), @Arg(column="duration_seconds", javaType=Integer.class), @Arg(column="view_count", javaType=Long.class), @Arg(column="like_count", javaType=Long.class), @Arg(column="comment_count", javaType=Long.class), @Arg(column="category_id", javaType=Long.class)})
     List<RecommendSource> listRecommend(@Param("categoryId") Long categoryId, @Param("limit") int limit, @Param("offset") int offset);
 
+    @Select("<script>SELECT v.id, v.title, a.nickname AS author_name, v.cover_object_key, v.duration_seconds, v.view_count, v.like_count, v.comment_count, v.category_id FROM video v JOIN account a ON a.id=v.author_id WHERE v.status='PUBLISHED' AND (v.title LIKE CONCAT('%', #{keyword}, '%') OR a.nickname LIKE CONCAT('%', #{keyword}, '%')) ORDER BY v.created_at DESC LIMIT #{limit} OFFSET #{offset}</script>")
+    @ConstructorArgs({@Arg(column="id", javaType=Long.class), @Arg(column="title", javaType=String.class), @Arg(column="author_name", javaType=String.class), @Arg(column="cover_object_key", javaType=String.class), @Arg(column="duration_seconds", javaType=Integer.class), @Arg(column="view_count", javaType=Long.class), @Arg(column="like_count", javaType=Long.class), @Arg(column="comment_count", javaType=Long.class), @Arg(column="category_id", javaType=Long.class)})
+    List<RecommendSource> search(@Param("keyword") String keyword, @Param("limit") int limit, @Param("offset") int offset);
+
     @Select("<script>SELECT COUNT(*) FROM video WHERE status='PUBLISHED' <if test='categoryId != null and categoryId &gt; 0'>AND category_id=#{categoryId}</if></script>")
     long countRecommend(@Param("categoryId") Long categoryId);
+
+    @Select("SELECT COUNT(*) FROM video v JOIN account a ON a.id=v.author_id WHERE v.status='PUBLISHED' AND (v.title LIKE CONCAT('%', #{keyword}, '%') OR a.nickname LIKE CONCAT('%', #{keyword}, '%'))")
+    long countSearch(@Param("keyword") String keyword);
 }

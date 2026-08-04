@@ -214,3 +214,7 @@
 .dark .fan-member b { color: #edf2fb; }
 .nav-monitor-icon, .nav-create-icon, .nav-search-icon, .nav-history-icon, .nav-following-icon, .nav-fans-icon, .nav-settings-icon { display: inline-grid; place-items: center; }
 .nav-monitor-icon svg, .nav-create-icon svg, .nav-search-icon svg, .nav-history-icon svg, .nav-following-icon svg, .nav-fans-icon svg, .nav-settings-icon svg { width: 25px; height: 25px; }
+.top-actions > .bell { display: inline-grid; width: 26px; height: 28px; padding: 0; place-items: center; }
+.bell svg { width: 25px; height: 25px; }
+.top-actions .profile { overflow: hidden; padding: 0; }
+.top-actions .profile img { width: 100%; height: 100%; object-fit: cover; }
