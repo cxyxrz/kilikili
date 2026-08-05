@@ -45,17 +45,42 @@ ALTER TABLE video ADD COLUMN IF NOT EXISTS creation_declaration VARCHAR(16) NOT 
 ALTER TABLE video ADD INDEX IF NOT EXISTS idx_video_recommend (status, category_id, created_at);
 
 CREATE TABLE IF NOT EXISTS category (
-  id BIGINT PRIMARY KEY,
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(32) NOT NULL UNIQUE,
+  code VARCHAR(64) NOT NULL UNIQUE,
+  parent_id BIGINT NULL,
   sort_order INT NOT NULL DEFAULT 0,
   status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_category_parent_sort (parent_id, sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT IGNORE INTO category(id, name, sort_order) VALUES
-  (1, '动画', 10), (2, 'MAD/AMV', 20), (3, 'MMD/3D', 30), (4, '配音', 40),
-  (5, '音乐', 50), (6, '游戏', 60), (7, '游戏直播', 70), (8, '电子竞技', 80),
-  (9, '科技', 90), (10, '编程', 100);
+INSERT IGNORE INTO category(id, name, code, parent_id, sort_order) VALUES
+  (1, '动画', 'anime', NULL, 1), (2, 'MAD/AMV', 'mad-amv', 1, 1),
+  (3, 'MMD/3D', 'mmd-3d', 1, 2), (4, '配音', 'dubbing', 1, 3),
+  (5, '音乐', 'music', NULL, 2), (6, '游戏', 'game', NULL, 3),
+  (7, '游戏直播', 'game-live', 6, 1), (8, '电子竞技', 'e-sports', 6, 2),
+  (9, '科技', 'tech', NULL, 4), (10, '编程', 'programming', 9, 1);
+
+UPDATE category SET code = CASE id
+  WHEN 1 THEN 'anime' WHEN 2 THEN 'mad-amv' WHEN 3 THEN 'mmd-3d' WHEN 4 THEN 'dubbing'
+  WHEN 5 THEN 'music' WHEN 6 THEN 'game' WHEN 7 THEN 'game-live' WHEN 8 THEN 'e-sports'
+  WHEN 9 THEN 'tech' WHEN 10 THEN 'programming'
+  ELSE CONCAT('category-', id)
+END WHERE code IS NULL OR code = '';
+
+UPDATE category SET parent_id = 1, sort_order = id - 1 WHERE id IN (2, 3, 4) AND parent_id IS NULL;
+UPDATE category SET parent_id = 6, sort_order = id - 6 WHERE id IN (7, 8) AND parent_id IS NULL;
+UPDATE category SET parent_id = 9, sort_order = 1 WHERE id = 10 AND parent_id IS NULL;
+
+INSERT IGNORE INTO category(name, code, parent_id, sort_order)
+SELECT '数码评测', 'review', id, 2 FROM category WHERE code = 'tech';
+INSERT IGNORE INTO category(name, code, parent_id, sort_order)
+SELECT '人工智能', 'ai', id, 3 FROM category WHERE code = 'tech';
+INSERT IGNORE INTO category(name, code, parent_id, sort_order) VALUES
+  ('生活', 'life', NULL, 5), ('美食', 'food', NULL, 6), ('知识', 'knowledge', NULL, 7),
+  ('运动', 'sports', NULL, 8), ('时尚', 'fashion', NULL, 9), ('娱乐', 'entertainment', NULL, 10),
+  ('影视', 'film', NULL, 11), ('舞蹈', 'dance', NULL, 12);
 
 CREATE TABLE IF NOT EXISTS video_like (
   user_id BIGINT NOT NULL,
