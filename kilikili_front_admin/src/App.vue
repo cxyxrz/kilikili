@@ -8,12 +8,14 @@ type VideoItem = { id: number; title: string; description: string; status: strin
 type DanmakuItem = { id: number; content: string; nickname: string; videoTitle: string; timeMs: number; createdAt: string };
 type CategoryItem = { id: number; name: string; code: string; parentId: number | null; sortOrder: number; childCount: number; videoCount: number };
 type CommentItem = { id: number; parentId: number | null; content: string; username: string; nickname: string; videoTitle: string; replyCount: number; createdAt: string };
+type OperationLogItem = { id: number; operatorId: number | null; operatorName: string; module: string; action: string; description: string; ipAddress: string; status: string; errorMessage: string | null; durationMs: number; createdAt: string };
+type SystemSettings = { allowRegistration: boolean; danmakuEnabled: boolean; commentEnabled: boolean; videoReviewEnabled: boolean; likeEnabled: boolean; coinEnabled: boolean; favoriteEnabled: boolean; followEnabled: boolean };
 
 const credentials = ref({ username: "", password: "" });
 const token = ref(sessionStorage.getItem("kilikili_admin_token") || "");
 const adminName = ref(sessionStorage.getItem("kilikili_admin_name") || "");
 const ready = ref(Boolean(token.value));
-const activePage = ref<Page>("users");
+const activePage = ref<Page>("settings");
 const sidebarCollapsed = ref(false);
 const contentExpanded = ref(true);
 const systemExpanded = ref(true);
@@ -25,6 +27,20 @@ const videos = ref<VideoItem[]>([]);
 const danmakus = ref<DanmakuItem[]>([]);
 const categories = ref<CategoryItem[]>([]);
 const comments = ref<CommentItem[]>([]);
+const operationLogs = ref<OperationLogItem[]>([]);
+const systemSettings = ref<SystemSettings>({ allowRegistration: true, danmakuEnabled: true, commentEnabled: true, videoReviewEnabled: true, likeEnabled: true, coinEnabled: true, favoriteEnabled: true, followEnabled: true });
+const settingsSaving = ref(false);
+const settingsSaved = ref(false);
+const settingOptions: { key: keyof SystemSettings; label: string }[] = [
+  { key: "allowRegistration", label: "允许注册" },
+  { key: "danmakuEnabled", label: "弹幕功能" },
+  { key: "commentEnabled", label: "评论功能" },
+  { key: "videoReviewEnabled", label: "视频审核" },
+  { key: "likeEnabled", label: "点赞功能" },
+  { key: "coinEnabled", label: "投币功能" },
+  { key: "favoriteEnabled", label: "收藏功能" },
+  { key: "followEnabled", label: "关注功能" },
+];
 const selectedCategoryId = ref<number | null>(null);
 const expandedCategoryId = ref<number | null>(null);
 const categoryDialog = ref(false);
@@ -45,6 +61,12 @@ const userPage = ref(1);
 const userPageSize = ref(10);
 const videoKeyword = ref("");
 const videoStatus = ref("");
+const logOperator = ref("");
+const logModule = ref("");
+const logTotal = ref(0);
+const logPage = ref(1);
+const logPageSize = ref(20);
+const logModules = ["仪表盘", "视频管理", "分类管理", "弹幕管理", "评论管理", "用户管理", "操作日志", "系统管理"];
 
 const headers = () => ({ Authorization: `Bearer ${token.value}` });
 const pageTitle: Record<Page, string> = {
@@ -69,6 +91,13 @@ const userPages = computed(() => Math.max(1, Math.ceil(userTotal.value / userPag
 const visibleUserPages = computed(() => {
   const total = userPages.value;
   const current = userPage.value;
+  const start = Math.max(1, Math.min(current - 1, total - 2));
+  return Array.from({ length: Math.min(3, total) }, (_, index) => start + index);
+});
+const logPages = computed(() => Math.max(1, Math.ceil(logTotal.value / logPageSize.value)));
+const visibleLogPages = computed(() => {
+  const total = logPages.value;
+  const current = logPage.value;
   const start = Math.max(1, Math.min(current - 1, total - 2));
   return Array.from({ length: Math.min(3, total) }, (_, index) => start + index);
 });
@@ -156,6 +185,54 @@ async function loadComments() {
     loading.value = false;
   }
 }
+async function loadOperationLogs() {
+  loading.value = true;
+  try {
+    const data = (await axios.get("/api/admin/operation-logs", {
+      headers: headers(),
+      params: {
+        operator: logOperator.value,
+        module: logModule.value,
+        page: logPage.value,
+        pageSize: logPageSize.value,
+      },
+    })).data.data;
+    operationLogs.value = data.items;
+    logTotal.value = data.total;
+  } catch (error) {
+    fail(error);
+  } finally {
+    loading.value = false;
+  }
+}
+async function loadSystemSettings() {
+  loading.value = true;
+  settingsSaved.value = false;
+  try {
+    systemSettings.value = (await axios.get("/api/admin/system-settings", { headers: headers() })).data.data;
+  } catch (error) {
+    fail(error);
+  } finally {
+    loading.value = false;
+  }
+}
+function toggleSystemSetting(key: keyof SystemSettings) {
+  systemSettings.value = { ...systemSettings.value, [key]: !systemSettings.value[key] };
+  settingsSaved.value = false;
+}
+async function saveSystemSettings() {
+  settingsSaving.value = true;
+  settingsSaved.value = false;
+  try {
+    systemSettings.value = (await axios.put("/api/admin/system-settings", systemSettings.value, { headers: headers() })).data.data;
+    settingsSaved.value = true;
+    window.setTimeout(() => { settingsSaved.value = false; }, 2200);
+  } catch (error) {
+    fail(error);
+  } finally {
+    settingsSaving.value = false;
+  }
+}
 async function login() {
   try {
     const data = (await axios.post("/api/admin/auth/login", credentials.value)).data.data;
@@ -165,7 +242,7 @@ async function login() {
     sessionStorage.setItem("kilikili_admin_name", adminName.value);
     ready.value = true;
     notice.value = "";
-    await openPage("users");
+    await openPage("settings");
   } catch (error) {
     fail(error);
   }
@@ -188,6 +265,8 @@ async function openPage(page: Page) {
     if (page === "danmakus") await loadDanmakus();
     if (page === "categories") await loadCategories();
     if (page === "comments") await loadComments();
+    if (page === "settings") await loadSystemSettings();
+    if (page === "logs") await loadOperationLogs();
   } catch (error) {
     fail(error);
   }
@@ -295,6 +374,26 @@ function changeUserPageSize() {
 function formatGender(gender?: string) {
   return gender === "MALE" ? "男" : gender === "FEMALE" ? "女" : "保密";
 }
+function searchOperationLogs() {
+  logPage.value = 1;
+  loadOperationLogs();
+}
+function changeLogPage(page: number) {
+  logPage.value = Math.min(Math.max(1, page), logPages.value);
+  loadOperationLogs();
+}
+function changeLogPageSize() {
+  logPage.value = 1;
+  loadOperationLogs();
+}
+async function clearOperationLogs() {
+  if (!window.confirm("确定清空全部操作日志吗？清空后将保留本次清空操作的审计记录。")) return;
+  try {
+    await axios.delete("/api/admin/operation-logs", { headers: headers() });
+    logPage.value = 1;
+    await loadOperationLogs();
+  } catch (error) { fail(error); }
+}
 function formatDuration(timeMs = 0) {
   const seconds = Math.max(0, Math.floor(timeMs / 1000));
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -303,7 +402,7 @@ function formatDate(value?: string) {
   return value ? value.replace("T", " ").replace("Z", "").slice(0, 19) : "-";
 }
 
-if (ready.value) openPage("users");
+if (ready.value) openPage("settings");
 </script>
 
 <template>
@@ -455,6 +554,34 @@ if (ready.value) openPage("users");
             <tr v-if="!users.length && !loading"><td colspan="7" class="empty-cell">暂无匹配用户</td></tr>
           </tbody></table></div>
           <footer class="pagination"><span>Total {{ userTotal }}</span><select v-model.number="userPageSize" @change="changeUserPageSize"><option :value="10">10/page</option><option :value="20">20/page</option><option :value="50">50/page</option></select><button :disabled="userPage <= 1" @click="changeUserPage(userPage - 1)">‹</button><button v-for="page in visibleUserPages" :key="page" :class="{ active: page === userPage }" @click="changeUserPage(page)">{{ page }}</button><button :disabled="userPage >= userPages" @click="changeUserPage(userPage + 1)">›</button><span>Go to</span><input :value="userPage" type="number" min="1" :max="userPages" @change="changeUserPage(Number(($event.target as HTMLInputElement).value))" /></footer>
+        </section>
+
+        <section v-else-if="activePage === 'settings'" class="system-setting-page">
+          <h1>系统设置</h1>
+          <div class="system-setting-card">
+            <div class="system-setting-list">
+              <div v-for="option in settingOptions" :key="option.key" class="system-setting-row">
+                <span>{{ option.label }}</span>
+                <button class="setting-switch" :class="{ active: systemSettings[option.key] }" :aria-label="`${option.label}${systemSettings[option.key] ? '已开启' : '已关闭'}`" @click="toggleSystemSetting(option.key)"><i></i></button>
+              </div>
+            </div>
+            <button class="save-settings-button" :disabled="settingsSaving" @click="saveSystemSettings">{{ settingsSaving ? '保存中...' : '保存设置' }}</button>
+            <p v-if="settingsSaved" class="settings-saved">设置已保存并立即生效</p>
+          </div>
+        </section>
+
+        <section v-else-if="activePage === 'logs'" class="operation-log-page">
+          <header><h1>操作日志</h1><button class="clear-log-button" @click="clearOperationLogs">清空日志</button></header>
+          <div class="operation-log-filter">
+            <input v-model.trim="logOperator" placeholder="搜索操作人" @keyup.enter="searchOperationLogs" />
+            <select v-model="logModule" @change="searchOperationLogs"><option value="">操作模块</option><option v-for="module in logModules" :key="module" :value="module">{{ module }}</option></select>
+            <button @click="searchOperationLogs">搜索</button>
+          </div>
+          <div class="admin-table-wrap operation-log-table"><table><thead><tr><th>模块</th><th>操作类型</th><th>操作描述</th><th>操作人</th><th>IP地址</th><th>状态</th><th>错误信息</th><th>操作时间</th></tr></thead><tbody>
+            <tr v-for="item in operationLogs" :key="item.id"><td>{{ item.module }}</td><td>{{ item.action }}</td><td>{{ item.description }}<small>耗时 {{ item.durationMs }}ms</small></td><td>{{ item.operatorName }}</td><td>{{ item.ipAddress || '-' }}</td><td><span class="log-status" :class="item.status">{{ item.status === 'SUCCESS' ? '成功' : '失败' }}</span></td><td class="log-error">{{ item.errorMessage || '-' }}</td><td>{{ formatDate(item.createdAt) }}</td></tr>
+            <tr v-if="!operationLogs.length && !loading"><td colspan="8" class="empty-cell">暂无操作日志</td></tr>
+          </tbody></table></div>
+          <footer class="pagination"><span>Total {{ logTotal }}</span><select v-model.number="logPageSize" @change="changeLogPageSize"><option :value="10">10/page</option><option :value="20">20/page</option><option :value="50">50/page</option></select><button :disabled="logPage <= 1" @click="changeLogPage(logPage - 1)">‹</button><button v-for="page in visibleLogPages" :key="page" :class="{ active: page === logPage }" @click="changeLogPage(page)">{{ page }}</button><button :disabled="logPage >= logPages" @click="changeLogPage(logPage + 1)">›</button><span>Go to</span><input :value="logPage" type="number" min="1" :max="logPages" @change="changeLogPage(Number(($event.target as HTMLInputElement).value))" /></footer>
         </section>
 
         <section v-else class="placeholder-page"><span>◇</span><h2>{{ pageTitle[activePage] }}</h2><p>该模块界面已预留，可在下一阶段继续接入业务数据。</p></section>

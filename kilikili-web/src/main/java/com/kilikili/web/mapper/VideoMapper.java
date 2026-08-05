@@ -58,8 +58,8 @@ public interface VideoMapper {
     @Select("SELECT " + VIDEO_COLUMNS + "FROM video v JOIN account a ON a.id=v.author_id WHERE v.status='PUBLISHED' ORDER BY v.created_at DESC LIMIT #{limit}")
     List<Video> listPublished(int limit);
 
-    @Insert("INSERT INTO video(author_id,title,description,object_key,cover_object_key,category_id,duration_seconds,creation_declaration,status) VALUES(#{authorId},#{title},#{description},#{objectKey},#{coverObjectKey},#{categoryId},#{durationSeconds},#{creationDeclaration},'PENDING_REVIEW')")
-    int insert(@Param("authorId") long authorId, @Param("title") String title, @Param("description") String description, @Param("objectKey") String objectKey, @Param("coverObjectKey") String coverObjectKey, @Param("categoryId") long categoryId, @Param("durationSeconds") int durationSeconds, @Param("creationDeclaration") String creationDeclaration);
+    @Insert("INSERT INTO video(author_id,title,description,object_key,cover_object_key,category_id,duration_seconds,creation_declaration,status) VALUES(#{authorId},#{title},#{description},#{objectKey},#{coverObjectKey},#{categoryId},#{durationSeconds},#{creationDeclaration},#{status})")
+    int insert(@Param("authorId") long authorId, @Param("title") String title, @Param("description") String description, @Param("objectKey") String objectKey, @Param("coverObjectKey") String coverObjectKey, @Param("categoryId") long categoryId, @Param("durationSeconds") int durationSeconds, @Param("creationDeclaration") String creationDeclaration, @Param("status") String status);
 
     @Update("UPDATE video SET view_count=view_count+1 WHERE id=#{id}")
     int increaseViews(long id);

@@ -2,6 +2,7 @@ package com.kilikili.web.service;
 
 import com.kilikili.common.exception.BusinessException;
 import com.kilikili.common.storage.StorageService;
+import com.kilikili.common.setting.SystemSettingService;
 import com.kilikili.web.entity.FollowerItem;
 import com.kilikili.web.entity.RecommendItem;
 import com.kilikili.web.mapper.AccountMapper;
@@ -18,16 +19,19 @@ public class FollowService {
     private final AccountMapper accountMapper;
     private final NotificationService notificationService;
     private final StorageService storageService;
+    private final SystemSettingService systemSettingService;
 
-    public FollowService(FollowMapper followMapper, AccountMapper accountMapper, NotificationService notificationService, StorageService storageService) {
+    public FollowService(FollowMapper followMapper, AccountMapper accountMapper, NotificationService notificationService, StorageService storageService, SystemSettingService systemSettingService) {
         this.followMapper = followMapper;
         this.accountMapper = accountMapper;
         this.notificationService = notificationService;
         this.storageService = storageService;
+        this.systemSettingService = systemSettingService;
     }
 
     @Transactional
     public Map<String, Object> toggle(long followerId, long followingId) {
+        systemSettingService.requireEnabled(SystemSettingService.FOLLOW_ENABLED, "关注功能已关闭");
         if (followerId == followingId) throw new BusinessException("不能关注自己");
         if (accountMapper.findById(followingId) == null) throw new BusinessException("UP 主不存在");
         if (followMapper.hasFollowed(followerId, followingId) > 0) {

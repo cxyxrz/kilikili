@@ -26,12 +26,23 @@ public class AdminAuthService {
         log.info("管理员登录成功: userId={}, username={}", account.id(), account.username());
         return Map.of("token", authService.createSession(account.id()), "user", Map.of("id", account.id(), "username", account.username(), "nickname", account.nickname(), "role", account.role()));
     }
-    public void requireAdmin(String authorization) {
+    public AdminAccount requireAdmin(String authorization) {
         long id = authService.requireUserId(authorization);
         AdminAccount account = adminMapper.findAccountById(id);
         if (account == null || !"ACTIVE".equals(account.status()) || !"ADMIN".equals(account.role())) {
             log.warn("拒绝非管理员后台访问: userId={}", id);
             throw new BusinessException("没有管理权限");
+        }
+        return account;
+    }
+
+    public AdminAccount currentAdminOrNull(String authorization) {
+        try {
+            long id = authService.requireUserId(authorization);
+            AdminAccount account = adminMapper.findAccountById(id);
+            return account != null && "ACTIVE".equals(account.status()) && "ADMIN".equals(account.role()) ? account : null;
+        } catch (RuntimeException ignored) {
+            return null;
         }
     }
 }

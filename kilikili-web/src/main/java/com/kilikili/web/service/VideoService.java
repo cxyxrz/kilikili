@@ -2,6 +2,7 @@ package com.kilikili.web.service;
 
 import com.kilikili.common.exception.BusinessException;
 import com.kilikili.common.storage.StorageService;
+import com.kilikili.common.setting.SystemSettingService;
 import com.kilikili.web.entity.Video;
 import com.kilikili.web.entity.VideoComment;
 import com.kilikili.web.entity.CreatorVideoItem;
@@ -27,10 +28,12 @@ public class VideoService {
     private final VideoMapper videoMapper;
     private final StorageService storageService;
     private final NotificationService notificationService;
-    public VideoService(VideoMapper videoMapper, StorageService storageService, NotificationService notificationService) {
+    private final SystemSettingService systemSettingService;
+    public VideoService(VideoMapper videoMapper, StorageService storageService, NotificationService notificationService, SystemSettingService systemSettingService) {
         this.videoMapper = videoMapper;
         this.storageService = storageService;
         this.notificationService = notificationService;
+        this.systemSettingService = systemSettingService;
     }
 
     @Transactional
@@ -43,9 +46,11 @@ public class VideoService {
         if (cover == null || cover.isEmpty()) throw new BusinessException("请上传封面");
         String objectKey = storageService.uploadVideo(file, userId);
         String coverObjectKey = storageService.uploadCover(cover, userId);
-        videoMapper.insert(userId, title, description, objectKey, coverObjectKey, categoryId, durationSeconds, creationDeclaration);
-        log.info("视频投稿已创建: userId={}, title={}, status=PENDING_REVIEW", userId, title);
-        return Map.of("message", "上传成功，正在等待审核", "status", "PENDING_REVIEW");
+        boolean reviewEnabled = systemSettingService.isEnabled(SystemSettingService.VIDEO_REVIEW_ENABLED);
+        String status = reviewEnabled ? "PENDING_REVIEW" : "PUBLISHED";
+        videoMapper.insert(userId, title, description, objectKey, coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
+        log.info("视频投稿已创建: userId={}, title={}, status={}", userId, title, status);
+        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核" : "上传成功，已自动发布", "status", status);
     }
 
     public List<Video> list() { return videoMapper.listPublished(30).stream().map(this::displayVideo).toList(); }
@@ -60,6 +65,7 @@ public class VideoService {
 
     @Transactional
     public Map<String, Object> toggleLike(long userId, long videoId) {
+        systemSettingService.requireEnabled(SystemSettingService.LIKE_ENABLED, "点赞功能已关闭");
         Video video = requireVideo(videoId);
         if (videoMapper.hasLiked(userId, videoId) > 0) {
             videoMapper.deleteLike(userId, videoId);
@@ -76,6 +82,7 @@ public class VideoService {
 
     @Transactional
     public Map<String, Object> toggleFavorite(long userId, long videoId) {
+        systemSettingService.requireEnabled(SystemSettingService.FAVORITE_ENABLED, "收藏功能已关闭");
         requireVideo(videoId);
         if (videoMapper.hasFavorited(userId, videoId) > 0) {
             videoMapper.deleteFavorite(userId, videoId);
@@ -101,6 +108,7 @@ public class VideoService {
 
     @Transactional
     public void comment(long userId, long videoId, String content) {
+        systemSettingService.requireEnabled(SystemSettingService.COMMENT_ENABLED, "评论功能已关闭");
         Video video = requireVideo(videoId);
         videoMapper.insertComment(new VideoComment(null, videoId, userId, null, content, null, null, null));
         videoMapper.increaseComments(videoId);
@@ -109,6 +117,7 @@ public class VideoService {
     }
     @Transactional
     public void reply(long userId, long videoId, long commentId, String content) {
+        systemSettingService.requireEnabled(SystemSettingService.COMMENT_ENABLED, "评论功能已关闭");
         requireVideo(videoId);
         VideoComment parent = videoMapper.listComments(videoId).stream().filter(item -> item.id().equals(commentId)).findFirst()
                 .orElseThrow(() -> new BusinessException("要回复的评论不存在"));
@@ -172,6 +181,7 @@ public class VideoService {
 
     @Transactional
     public void sendDanmaku(long userId, long videoId, String content, String mode, String color, int timeMs) {
+        systemSettingService.requireEnabled(SystemSettingService.DANMAKU_ENABLED, "弹幕功能已关闭");
         Video video = requireVideo(videoId);
         if (!"PUBLISHED".equals(video.status())) throw new BusinessException("仅已发布视频可以发送弹幕");
         videoMapper.insertDanmaku(new Danmaku(null, videoId, userId, content.trim(), mode, color.toUpperCase(), timeMs, null));

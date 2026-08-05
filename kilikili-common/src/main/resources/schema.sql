@@ -153,3 +153,38 @@ CREATE TABLE IF NOT EXISTS user_notification (
   INDEX idx_notification_recipient_created (recipient_id, created_at),
   INDEX idx_notification_recipient_type (recipient_id, type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS admin_operation_log (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  operator_id BIGINT NULL,
+  operator_name VARCHAR(64) NOT NULL,
+  module VARCHAR(32) NOT NULL,
+  action VARCHAR(16) NOT NULL,
+  description VARCHAR(255) NOT NULL,
+  ip_address VARCHAR(64) NULL,
+  status VARCHAR(16) NOT NULL,
+  error_message VARCHAR(500) NULL,
+  duration_ms BIGINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_admin_log_created (created_at),
+  INDEX idx_admin_log_module_created (module, created_at),
+  INDEX idx_admin_log_operator_created (operator_name, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS system_setting (
+  setting_key VARCHAR(64) PRIMARY KEY,
+  setting_value VARCHAR(255) NOT NULL,
+  description VARCHAR(255) NULL,
+  updated_by BIGINT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO system_setting(setting_key, setting_value, description) VALUES
+  ('allow_registration', 'true', '允许新用户注册'),
+  ('danmaku_enabled', 'true', '弹幕功能'),
+  ('comment_enabled', 'true', '评论功能'),
+  ('video_review_enabled', 'true', '视频投稿需要审核'),
+  ('like_enabled', 'true', '点赞功能'),
+  ('coin_enabled', 'true', '投币功能'),
+  ('favorite_enabled', 'true', '收藏功能'),
+  ('follow_enabled', 'true', '关注功能');

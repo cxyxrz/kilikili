@@ -9,6 +9,7 @@ import com.kilikili.web.entity.Account;
 import com.kilikili.web.entity.AccountProfile;
 import com.kilikili.web.mapper.AccountMapper;
 import com.kilikili.common.storage.StorageService;
+import com.kilikili.common.setting.SystemSettingService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,11 +25,13 @@ public class AccountService {
     private final AccountMapper accountMapper;
     private final AuthService authService;
     private final StorageService storageService;
+    private final SystemSettingService systemSettingService;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-    public AccountService(AccountMapper accountMapper, AuthService authService, StorageService storageService) { this.accountMapper = accountMapper; this.authService = authService; this.storageService = storageService; }
+    public AccountService(AccountMapper accountMapper, AuthService authService, StorageService storageService, SystemSettingService systemSettingService) { this.accountMapper = accountMapper; this.authService = authService; this.storageService = storageService; this.systemSettingService = systemSettingService; }
 
     @Transactional
     public Map<String, Object> register(RegisterRequest request) {
+        systemSettingService.requireEnabled(SystemSettingService.ALLOW_REGISTRATION, "系统当前暂停注册");
         if (accountMapper.findByUsername(request.username()) != null) {
             log.warn("注册失败，用户名已存在: username={}", request.username());
             throw new BusinessException("用户名已存在");
