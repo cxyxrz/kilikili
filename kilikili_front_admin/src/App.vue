@@ -7,12 +7,13 @@ type UserItem = { id: number; username: string; nickname: string; status: string
 type VideoItem = { id: number; title: string; description: string; status: string; username: string; nickname: string; viewCount: number; likeCount: number; commentCount: number; createdAt?: string };
 type DanmakuItem = { id: number; content: string; nickname: string; videoTitle: string; timeMs: number; createdAt: string };
 type CategoryItem = { id: number; name: string; code: string; parentId: number | null; sortOrder: number; childCount: number; videoCount: number };
+type CommentItem = { id: number; parentId: number | null; content: string; username: string; nickname: string; videoTitle: string; replyCount: number; createdAt: string };
 
 const credentials = ref({ username: "", password: "" });
 const token = ref(sessionStorage.getItem("kilikili_admin_token") || "");
 const adminName = ref(sessionStorage.getItem("kilikili_admin_name") || "");
 const ready = ref(Boolean(token.value));
-const activePage = ref<Page>("categories");
+const activePage = ref<Page>("comments");
 const sidebarCollapsed = ref(false);
 const contentExpanded = ref(true);
 const systemExpanded = ref(true);
@@ -23,6 +24,7 @@ const users = ref<UserItem[]>([]);
 const videos = ref<VideoItem[]>([]);
 const danmakus = ref<DanmakuItem[]>([]);
 const categories = ref<CategoryItem[]>([]);
+const comments = ref<CommentItem[]>([]);
 const selectedCategoryId = ref<number | null>(null);
 const expandedCategoryId = ref<number | null>(null);
 const categoryDialog = ref(false);
@@ -31,6 +33,11 @@ const categoryForm = ref({ name: "", code: "", parentId: null as number | null, 
 const danmakuTotal = ref(0);
 const danmakuPage = ref(1);
 const danmakuPageSize = ref(10);
+const commentTotal = ref(0);
+const commentPage = ref(1);
+const commentPageSize = ref(10);
+const commentKeyword = ref("");
+const commentType = ref("");
 const userKeyword = ref("");
 const videoKeyword = ref("");
 const videoStatus = ref("");
@@ -44,6 +51,13 @@ const danmakuPages = computed(() => Math.max(1, Math.ceil(danmakuTotal.value / d
 const visiblePages = computed(() => {
   const total = danmakuPages.value;
   const current = danmakuPage.value;
+  const start = Math.max(1, Math.min(current - 1, total - 2));
+  return Array.from({ length: Math.min(3, total) }, (_, index) => start + index);
+});
+const commentPages = computed(() => Math.max(1, Math.ceil(commentTotal.value / commentPageSize.value)));
+const visibleCommentPages = computed(() => {
+  const total = commentPages.value;
+  const current = commentPage.value;
   const start = Math.max(1, Math.min(current - 1, total - 2));
   return Array.from({ length: Math.min(3, total) }, (_, index) => start + index);
 });
@@ -99,6 +113,26 @@ async function loadCategories() {
     loading.value = false;
   }
 }
+async function loadComments() {
+  loading.value = true;
+  try {
+    const data = (await axios.get("/api/admin/comments", {
+      headers: headers(),
+      params: {
+        keyword: commentKeyword.value,
+        type: commentType.value,
+        page: commentPage.value,
+        pageSize: commentPageSize.value,
+      },
+    })).data.data;
+    comments.value = data.items;
+    commentTotal.value = data.total;
+  } catch (error) {
+    fail(error);
+  } finally {
+    loading.value = false;
+  }
+}
 async function login() {
   try {
     const data = (await axios.post("/api/admin/auth/login", credentials.value)).data.data;
@@ -108,7 +142,7 @@ async function login() {
     sessionStorage.setItem("kilikili_admin_name", adminName.value);
     ready.value = true;
     notice.value = "";
-    await openPage("categories");
+    await openPage("comments");
   } catch (error) {
     fail(error);
   }
@@ -130,6 +164,7 @@ async function openPage(page: Page) {
     if (page === "users") await loadUsers();
     if (page === "danmakus") await loadDanmakus();
     if (page === "categories") await loadCategories();
+    if (page === "comments") await loadComments();
   } catch (error) {
     fail(error);
   }
@@ -192,6 +227,15 @@ async function deleteCategory(item: CategoryItem) {
     await loadCategories();
   } catch (error) { fail(error); }
 }
+async function deleteComment(item: CommentItem) {
+  const detail = item.parentId == null && item.replyCount > 0 ? `，并同时删除 ${item.replyCount} 条回复` : "";
+  if (!window.confirm(`确定删除这条评论${detail}吗？`)) return;
+  try {
+    await axios.delete(`/api/admin/comments/${item.id}`, { headers: headers() });
+    if (comments.value.length === 1 && commentPage.value > 1) commentPage.value -= 1;
+    await Promise.all([loadComments(), dashboard()]);
+  } catch (error) { fail(error); }
+}
 function changeDanmakuPage(page: number) {
   danmakuPage.value = Math.min(Math.max(1, page), danmakuPages.value);
   loadDanmakus();
@@ -199,6 +243,18 @@ function changeDanmakuPage(page: number) {
 function changePageSize() {
   danmakuPage.value = 1;
   loadDanmakus();
+}
+function searchComments() {
+  commentPage.value = 1;
+  loadComments();
+}
+function changeCommentPage(page: number) {
+  commentPage.value = Math.min(Math.max(1, page), commentPages.value);
+  loadComments();
+}
+function changeCommentPageSize() {
+  commentPage.value = 1;
+  loadComments();
 }
 function formatDuration(timeMs = 0) {
   const seconds = Math.max(0, Math.floor(timeMs / 1000));
@@ -208,7 +264,7 @@ function formatDate(value?: string) {
   return value ? value.replace("T", " ").replace("Z", "").slice(0, 19) : "-";
 }
 
-if (ready.value) openPage("categories");
+if (ready.value) openPage("comments");
 </script>
 
 <template>
@@ -322,6 +378,25 @@ if (ready.value) openPage("categories");
             <tr v-if="!danmakus.length && !loading"><td colspan="6" class="empty-cell">暂无弹幕数据</td></tr>
           </tbody></table></div>
           <footer class="pagination"><span>Total {{ danmakuTotal }}</span><select v-model.number="danmakuPageSize" @change="changePageSize"><option :value="10">10/page</option><option :value="20">20/page</option><option :value="50">50/page</option></select><button :disabled="danmakuPage <= 1" @click="changeDanmakuPage(danmakuPage - 1)">‹</button><button v-for="page in visiblePages" :key="page" :class="{ active: page === danmakuPage }" @click="changeDanmakuPage(page)">{{ page }}</button><button :disabled="danmakuPage >= danmakuPages" @click="changeDanmakuPage(danmakuPage + 1)">›</button><span>Go to</span><input :value="danmakuPage" type="number" min="1" :max="danmakuPages" @change="changeDanmakuPage(Number(($event.target as HTMLInputElement).value))" /></footer>
+        </section>
+
+        <section v-else-if="activePage === 'comments'" class="comment-page">
+          <div class="comment-filter">
+            <input v-model.trim="commentKeyword" placeholder="搜索评论内容、用户或视频标题" @keyup.enter="searchComments" />
+            <select v-model="commentType" @change="searchComments"><option value="">全部类型</option><option value="ROOT">主评论</option><option value="REPLY">回复</option></select>
+            <button @click="searchComments">搜索</button>
+            <span>共 {{ commentTotal }} 条评论</span>
+          </div>
+          <div class="admin-table-wrap comment-table"><table><thead><tr><th>评论内容</th><th>类型</th><th>评论用户</th><th>所属视频</th><th>发布时间</th><th>操作</th></tr></thead><tbody>
+            <tr v-for="item in comments" :key="item.id">
+              <td><b>{{ item.content }}</b><small v-if="item.parentId == null && item.replyCount">{{ item.replyCount }} 条回复</small><small v-else-if="item.parentId != null">回复评论 #{{ item.parentId }}</small></td>
+              <td><span class="comment-type" :class="{ reply: item.parentId != null }">{{ item.parentId == null ? '主评论' : '回复' }}</span></td>
+              <td>{{ item.nickname }}<small>@{{ item.username }}</small></td>
+              <td>{{ item.videoTitle }}</td><td>{{ formatDate(item.createdAt) }}</td><td><button class="text-danger" @click="deleteComment(item)">删除</button></td>
+            </tr>
+            <tr v-if="!comments.length && !loading"><td colspan="6" class="empty-cell">暂无匹配的评论</td></tr>
+          </tbody></table></div>
+          <footer class="pagination"><span>Total {{ commentTotal }}</span><select v-model.number="commentPageSize" @change="changeCommentPageSize"><option :value="10">10/page</option><option :value="20">20/page</option><option :value="50">50/page</option></select><button :disabled="commentPage <= 1" @click="changeCommentPage(commentPage - 1)">‹</button><button v-for="page in visibleCommentPages" :key="page" :class="{ active: page === commentPage }" @click="changeCommentPage(page)">{{ page }}</button><button :disabled="commentPage >= commentPages" @click="changeCommentPage(commentPage + 1)">›</button><span>Go to</span><input :value="commentPage" type="number" min="1" :max="commentPages" @change="changeCommentPage(Number(($event.target as HTMLInputElement).value))" /></footer>
         </section>
 
         <section v-else-if="activePage === 'users'" class="management-page">
