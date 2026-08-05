@@ -26,12 +26,6 @@ public interface AdminMapper {
     @Select("SELECT (SELECT COUNT(*) FROM account) AS users, (SELECT COUNT(*) FROM video) AS videos, (SELECT COUNT(*) FROM video WHERE status='PENDING_REVIEW') AS pendingVideos, (SELECT COUNT(*) FROM video_comment) AS comments")
     Map<String, Object> dashboard();
 
-    @Select("<script>SELECT id,username,nickname,status,created_at AS createdAt FROM account <where><if test='keyword != null and keyword != \"\"'>AND (username LIKE CONCAT('%',#{keyword},'%') OR nickname LIKE CONCAT('%',#{keyword},'%'))</if></where> ORDER BY created_at DESC LIMIT #{limit}</script>")
-    List<Map<String, Object>> users(@Param("keyword") String keyword, @Param("limit") int limit);
-
-    @Update("UPDATE account SET status=#{status} WHERE id=#{id}")
-    int updateUserStatus(@Param("id") long id, @Param("status") String status);
-
     @Select("<script>SELECT v.id,v.title,v.description,v.status,v.view_count AS viewCount,v.like_count AS likeCount,v.comment_count AS commentCount,v.created_at AS createdAt,a.username,a.nickname FROM video v JOIN account a ON a.id=v.author_id <where><if test='status != null and status != \"\"'>AND v.status=#{status}</if><if test='keyword != null and keyword != \"\"'>AND (v.title LIKE CONCAT('%',#{keyword},'%') OR a.username LIKE CONCAT('%',#{keyword},'%'))</if></where> ORDER BY v.created_at DESC LIMIT #{limit}</script>")
     List<Map<String, Object>> videos(@Param("status") String status, @Param("keyword") String keyword, @Param("limit") int limit);
 

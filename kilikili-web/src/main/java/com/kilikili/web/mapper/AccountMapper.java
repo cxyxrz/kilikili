@@ -24,4 +24,7 @@ public interface AccountMapper {
 
     @Update("UPDATE account SET avatar=#{avatar} WHERE id=#{id}")
     int updateAvatar(@Param("id") long id, @Param("avatar") String avatar);
+
+    @Update("UPDATE account SET last_login_at=CURRENT_TIMESTAMP WHERE id=#{id}")
+    int updateLastLoginAt(@Param("id") long id);
 }

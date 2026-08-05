@@ -35,6 +35,7 @@ public class AccountService {
         }
         accountMapper.insert(new Account(null, request.username(), encoder.encode(request.password()), request.nickname(), null, null, "ACTIVE"));
         Account account = accountMapper.findByUsername(request.username());
+        accountMapper.updateLastLoginAt(account.id());
         log.info("用户注册成功: userId={}, username={}", account.id(), account.username());
         return session(account);
     }
@@ -48,6 +49,7 @@ public class AccountService {
             log.warn("已禁用用户尝试登录: userId={}", account.id());
             throw new BusinessException("该账号已被禁用");
         }
+        accountMapper.updateLastLoginAt(account.id());
         log.info("用户登录成功: userId={}, username={}", account.id(), account.username());
         return session(account);
     }

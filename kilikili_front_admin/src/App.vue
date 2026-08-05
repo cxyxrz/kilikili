@@ -3,7 +3,7 @@ import axios from "axios";
 import { computed, ref } from "vue";
 
 type Page = "dashboard" | "audit" | "videos" | "categories" | "danmakus" | "comments" | "users" | "settings" | "logs";
-type UserItem = { id: number; username: string; nickname: string; status: string; createdAt?: string };
+type UserItem = { id: number; username: string; email: string | null; nickname: string; avatarUrl: string | null; gender: string; status: string; createdAt?: string; lastLoginAt?: string };
 type VideoItem = { id: number; title: string; description: string; status: string; username: string; nickname: string; viewCount: number; likeCount: number; commentCount: number; createdAt?: string };
 type DanmakuItem = { id: number; content: string; nickname: string; videoTitle: string; timeMs: number; createdAt: string };
 type CategoryItem = { id: number; name: string; code: string; parentId: number | null; sortOrder: number; childCount: number; videoCount: number };
@@ -13,7 +13,7 @@ const credentials = ref({ username: "", password: "" });
 const token = ref(sessionStorage.getItem("kilikili_admin_token") || "");
 const adminName = ref(sessionStorage.getItem("kilikili_admin_name") || "");
 const ready = ref(Boolean(token.value));
-const activePage = ref<Page>("comments");
+const activePage = ref<Page>("users");
 const sidebarCollapsed = ref(false);
 const contentExpanded = ref(true);
 const systemExpanded = ref(true);
@@ -39,6 +39,10 @@ const commentPageSize = ref(10);
 const commentKeyword = ref("");
 const commentType = ref("");
 const userKeyword = ref("");
+const userStatus = ref("");
+const userTotal = ref(0);
+const userPage = ref(1);
+const userPageSize = ref(10);
 const videoKeyword = ref("");
 const videoStatus = ref("");
 
@@ -61,6 +65,13 @@ const visibleCommentPages = computed(() => {
   const start = Math.max(1, Math.min(current - 1, total - 2));
   return Array.from({ length: Math.min(3, total) }, (_, index) => start + index);
 });
+const userPages = computed(() => Math.max(1, Math.ceil(userTotal.value / userPageSize.value)));
+const visibleUserPages = computed(() => {
+  const total = userPages.value;
+  const current = userPage.value;
+  const start = Math.max(1, Math.min(current - 1, total - 2));
+  return Array.from({ length: Math.min(3, total) }, (_, index) => start + index);
+});
 const rootCategories = computed(() => categories.value
   .filter((item) => item.parentId == null)
   .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id));
@@ -75,7 +86,19 @@ async function dashboard() {
   stats.value = (await axios.get("/api/admin/dashboard", { headers: headers() })).data.data;
 }
 async function loadUsers() {
-  users.value = (await axios.get("/api/admin/users", { headers: headers(), params: { keyword: userKeyword.value } })).data.data;
+  loading.value = true;
+  try {
+    const data = (await axios.get("/api/admin/users", {
+      headers: headers(),
+      params: { keyword: userKeyword.value, status: userStatus.value, page: userPage.value, pageSize: userPageSize.value },
+    })).data.data;
+    users.value = data.items;
+    userTotal.value = data.total;
+  } catch (error) {
+    fail(error);
+  } finally {
+    loading.value = false;
+  }
 }
 async function loadVideos() {
   videos.value = (await axios.get("/api/admin/videos", { headers: headers(), params: { keyword: videoKeyword.value, status: videoStatus.value } })).data.data;
@@ -142,7 +165,7 @@ async function login() {
     sessionStorage.setItem("kilikili_admin_name", adminName.value);
     ready.value = true;
     notice.value = "";
-    await openPage("comments");
+    await openPage("users");
   } catch (error) {
     fail(error);
   }
@@ -172,6 +195,7 @@ async function openPage(page: Page) {
 async function setUserStatus(id: number, status: string) {
   try {
     await axios.patch(`/api/admin/users/${id}/status`, { status }, { headers: headers() });
+    if (users.value.length === 1 && userPage.value > 1 && userStatus.value && userStatus.value !== status) userPage.value -= 1;
     await Promise.all([loadUsers(), dashboard()]);
   } catch (error) { fail(error); }
 }
@@ -256,6 +280,21 @@ function changeCommentPageSize() {
   commentPage.value = 1;
   loadComments();
 }
+function searchUsers() {
+  userPage.value = 1;
+  loadUsers();
+}
+function changeUserPage(page: number) {
+  userPage.value = Math.min(Math.max(1, page), userPages.value);
+  loadUsers();
+}
+function changeUserPageSize() {
+  userPage.value = 1;
+  loadUsers();
+}
+function formatGender(gender?: string) {
+  return gender === "MALE" ? "男" : gender === "FEMALE" ? "女" : "保密";
+}
 function formatDuration(timeMs = 0) {
   const seconds = Math.max(0, Math.floor(timeMs / 1000));
   return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -264,7 +303,7 @@ function formatDate(value?: string) {
   return value ? value.replace("T", " ").replace("Z", "").slice(0, 19) : "-";
 }
 
-if (ready.value) openPage("comments");
+if (ready.value) openPage("users");
 </script>
 
 <template>
@@ -399,9 +438,23 @@ if (ready.value) openPage("comments");
           <footer class="pagination"><span>Total {{ commentTotal }}</span><select v-model.number="commentPageSize" @change="changeCommentPageSize"><option :value="10">10/page</option><option :value="20">20/page</option><option :value="50">50/page</option></select><button :disabled="commentPage <= 1" @click="changeCommentPage(commentPage - 1)">‹</button><button v-for="page in visibleCommentPages" :key="page" :class="{ active: page === commentPage }" @click="changeCommentPage(page)">{{ page }}</button><button :disabled="commentPage >= commentPages" @click="changeCommentPage(commentPage + 1)">›</button><span>Go to</span><input :value="commentPage" type="number" min="1" :max="commentPages" @change="changeCommentPage(Number(($event.target as HTMLInputElement).value))" /></footer>
         </section>
 
-        <section v-else-if="activePage === 'users'" class="management-page">
-          <div class="filter-bar"><input v-model="userKeyword" placeholder="用户名或昵称" @keyup.enter="loadUsers" /><button @click="loadUsers">搜索</button></div>
-          <div class="admin-table-wrap"><table><thead><tr><th>ID</th><th>用户名</th><th>昵称</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="item in users" :key="item.id"><td>{{ item.id }}</td><td>{{ item.username }}</td><td>{{ item.nickname }}</td><td><span class="status" :class="item.status">{{ item.status }}</span></td><td><button v-if="item.status === 'ACTIVE'" class="text-danger" @click="setUserStatus(item.id, 'DISABLED')">禁用</button><button v-else @click="setUserStatus(item.id, 'ACTIVE')">启用</button></td></tr></tbody></table></div>
+        <section v-else-if="activePage === 'users'" class="user-page">
+          <h1>用户管理</h1>
+          <div class="user-filter">
+            <input v-model.trim="userKeyword" placeholder="搜索昵称/邮箱" @keyup.enter="searchUsers" />
+            <select v-model="userStatus" @change="searchUsers"><option value="">状态</option><option value="ACTIVE">正常</option><option value="DISABLED">禁用</option></select>
+            <button @click="searchUsers">搜索</button>
+          </div>
+          <div class="admin-table-wrap user-table"><table><thead><tr><th>头像</th><th>昵称</th><th>邮箱</th><th>性别</th><th>状态</th><th>注册时间</th><th>最后登录</th></tr></thead><tbody>
+            <tr v-for="item in users" :key="item.id">
+              <td><img v-if="item.avatarUrl" :src="item.avatarUrl" :alt="item.nickname" /><span v-else class="avatar-fallback">{{ item.nickname?.slice(0, 1).toUpperCase() || 'K' }}</span></td>
+              <td>{{ item.nickname }}<small>@{{ item.username }}</small></td><td>{{ item.email || item.username }}</td><td>{{ formatGender(item.gender) }}</td>
+              <td><div class="user-status-control"><span :class="{ muted: item.status === 'ACTIVE' }">禁用</span><button class="user-switch" :class="{ active: item.status === 'ACTIVE' }" :aria-label="item.status === 'ACTIVE' ? '禁用用户' : '启用用户'" @click="setUserStatus(item.id, item.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE')"><i></i></button><span :class="{ normal: item.status === 'ACTIVE' }">正常</span></div></td>
+              <td>{{ formatDate(item.createdAt) }}</td><td>{{ item.lastLoginAt ? formatDate(item.lastLoginAt) : '从未登录' }}</td>
+            </tr>
+            <tr v-if="!users.length && !loading"><td colspan="7" class="empty-cell">暂无匹配用户</td></tr>
+          </tbody></table></div>
+          <footer class="pagination"><span>Total {{ userTotal }}</span><select v-model.number="userPageSize" @change="changeUserPageSize"><option :value="10">10/page</option><option :value="20">20/page</option><option :value="50">50/page</option></select><button :disabled="userPage <= 1" @click="changeUserPage(userPage - 1)">‹</button><button v-for="page in visibleUserPages" :key="page" :class="{ active: page === userPage }" @click="changeUserPage(page)">{{ page }}</button><button :disabled="userPage >= userPages" @click="changeUserPage(userPage + 1)">›</button><span>Go to</span><input :value="userPage" type="number" min="1" :max="userPages" @change="changeUserPage(Number(($event.target as HTMLInputElement).value))" /></footer>
         </section>
 
         <section v-else class="placeholder-page"><span>◇</span><h2>{{ pageTitle[activePage] }}</h2><p>该模块界面已预留，可在下一阶段继续接入业务数据。</p></section>

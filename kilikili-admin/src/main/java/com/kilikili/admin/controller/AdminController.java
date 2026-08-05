@@ -24,16 +24,6 @@ public class AdminController {
         require(authorization);
         return ApiResponse.ok(adminService.dashboard());
     }
-    @Operation(summary = "查询用户") @GetMapping("/users")
-    public ApiResponse<List<Map<String, Object>>> users(@RequestHeader("Authorization") String authorization, @RequestParam(required = false) String keyword, @RequestParam(defaultValue = "50") int limit) {
-        require(authorization);
-        return ApiResponse.ok(adminService.users(keyword, Math.min(Math.max(limit, 1), 100)));
-    }
-    @Operation(summary = "启用或禁用用户") @PatchMapping("/users/{id}/status")
-    public ApiResponse<Void> userStatus(@RequestHeader("Authorization") String authorization, @PathVariable long id, @Valid @RequestBody StatusRequest request) {
-        require(authorization);
-        adminService.updateUserStatus(id, request.status()); return ApiResponse.ok(null);
-    }
     @Operation(summary = "查询视频及审核状态") @GetMapping("/videos")
     public ApiResponse<List<Map<String, Object>>> videos(@RequestHeader("Authorization") String authorization, @RequestParam(required = false) String status, @RequestParam(required = false) String keyword, @RequestParam(defaultValue = "50") int limit) {
         require(authorization);
