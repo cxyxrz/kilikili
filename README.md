@@ -4,6 +4,55 @@
 
 详细的数据模型、状态机、接口清单与迁移顺序见 [数据库与接口设计](docs/database-api-design.md)。
 
+## 技术架构
+
+```mermaid
+flowchart TB
+    subgraph Client["浏览器 / Client"]
+        WebUI["kilikili_front_web<br/>Vue 3 + Vite<br/>用户端 · 3001"]
+        AdminUI["kilikili_front_admin<br/>Vue 3 + Vite<br/>管理端 · 3000"]
+    end
+
+    subgraph Gateway["前端开发代理"]
+        WebProxy["/api/* → localhost:7071"]
+        AdminProxy["/api/* → localhost:7070"]
+    end
+
+    subgraph Backend["Spring Boot 3.4 / JDK 21"]
+        WebAPI["kilikili-web · 7071<br/>注册登录 · 推荐搜索 · 视频播放<br/>上传 · 评论 · 弹幕 · 点赞收藏 · 关注通知"]
+        AdminAPI["kilikili-admin · 7070<br/>内容审核 · 分类管理 · 用户管理<br/>评论/弹幕管理 · 系统设置 · 操作日志"]
+        Common["kilikili-common<br/>MyBatis Mapper · 共享服务与配置<br/>Redis 会话 · MinIO 存储 · 统一响应<br/>Knife4j / OpenAPI · SLF4J / Logback"]
+    end
+
+    subgraph Infrastructure["本地基础设施"]
+        MySQL[("MySQL 8<br/>业务数据与系统配置")]
+        Redis[("Redis<br/>登录会话 · 推荐缓存")]
+        MinIO[("MinIO<br/>视频 · 封面 · 用户头像")]
+    end
+
+    subgraph Extension["预留扩展（尚未完整接入）"]
+        FFmpeg["FFmpeg<br/>异步转码 / 截帧"]
+        DeepSeek["DeepSeek LLM<br/>AI 审核 / 内容优化"]
+    end
+
+    WebUI --> WebProxy --> WebAPI
+    AdminUI --> AdminProxy --> AdminAPI
+    WebAPI --> Common
+    AdminAPI --> Common
+    Common --> MySQL
+    Common --> Redis
+    Common --> MinIO
+    WebAPI -.规划.-> FFmpeg
+    AdminAPI -.规划.-> DeepSeek
+```
+
+### 请求链路
+
+1. 用户端和管理端分别通过 Vite 的 `/api/*` 代理访问对应的 Spring Boot 服务。
+2. 两个后端模块复用 `kilikili-common` 中的认证、存储、数据库访问、统一响应、日志和接口文档能力。
+3. MySQL 保存用户、视频、互动、审核及系统配置；Redis 保存登录会话并缓存推荐结果；MinIO 保存视频、封面和头像。
+4. FFmpeg 与 DeepSeek 作为后续转码和 AI 审核能力的扩展点，在图中使用虚线标识。
+
 ## 项目结构
 
 | 目录 | 用途 | 端口 |
