@@ -67,7 +67,9 @@
 .watch-main { min-width: 0; }
 .watch-player-card { overflow: hidden; background: #fff; border: 1px solid #e1e4ea; border-radius: 14px; box-shadow: 0 8px 24px #25304912; }
 /* 播放区固定 16:9，HLS(MSE) 视频无固有尺寸，不能依赖内容撑高 */
-.video-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 78vh; overflow: hidden; background: #000; }
+.video-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 78vh; background: #000; }
+/* 播放器卡片与舞台不裁剪溢出，保证清晰度/倍速菜单弹出时不被 cut 掉而无法点击 */
+.watch-player-card { overflow: visible; }
 .video-stage video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: 0; }
 .danmaku-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .danmaku-color { display: grid; width: 30px; height: 29px; margin-left: 10px; overflow: hidden; place-items: center; background: #fff; border: 1px solid #e3e6ed; border-radius: 4px; cursor: pointer; }

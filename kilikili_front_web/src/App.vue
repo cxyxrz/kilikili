@@ -148,8 +148,11 @@ const uploadSuccessVisible = ref(false);
 const uploadSuccessMessage = ref("");
 const uploadWarningVisible = ref(false);
 const uploadWarningMessage = ref("");
-const qualityLevels = ref<{ index: number; label: string }[]>([]);
-const selectedQuality = ref(-1);
+// 清晰度以「分辨率高度」标识，菜单优先用后端返回的转码档位填充，hls.js 解析后再校正
+const qualityLevels = ref<{ height: number; label: string }[]>([]);
+const selectedQuality = ref<number | null>(null);
+// 后端声明的转码档位高度，用于在 hls.js 解析完成前先渲染清晰度菜单
+const serverHeights = ref<number[]>([]);
 const qualityMenuOpen = ref(false);
 const theaterMode = ref(false);
 const isPlaying = ref(false);
@@ -258,13 +261,13 @@ function qualityLabel(height: number) {
 
 // 播放器右下角清晰度角标文案，如 "1080P 高清" / "自动"
 const qualityBadgeText = computed(() => {
-  if (selectedQuality.value === -1) return "自动";
-  const quality = qualityLevels.value.find((item) => item.index === selectedQuality.value);
+  if (selectedQuality.value === null) return "自动";
+  const quality = qualityLevels.value.find((item) => item.height === selectedQuality.value);
   return quality ? quality.label : "自动";
 });
 
-function pickQuality(index: number) {
-  switchQuality(index);
+function pickQuality(height: number | null) {
+  switchQuality(height);
   qualityMenuOpen.value = false;
 }
 
@@ -274,49 +277,65 @@ function destroyHls() {
     hlsInstance = null;
   }
   qualityLevels.value = [];
-  selectedQuality.value = -1;
+  selectedQuality.value = null;
 }
 
-// HLS 地址交给 hls.js（Safari 走原生支持），普通 MP4 直接设置 src
+// 后端 render 档位（如 "1080p"）转成高度，用于在 hls.js 解析完成前就先渲染清晰度菜单
+function renditionHeights(renditions: string[]) {
+  const heights = renditions
+    .map((name) => Number.parseInt(name, 10))
+    .filter((height) => Number.isFinite(height) && height > 0);
+  return [...new Set(heights)].sort((a, b) => b - a);
+}
+
+// HLS 地址交给 hls.js（优先），无法使用 MSE 时再退回浏览器原生 HLS，普通 MP4 直接设置 src
 function attachVideoSource() {
   const el = videoPlayer.value;
   const url = playUrl.value;
   if (!el || !url) return;
   destroyHls();
-  if (url.includes(".m3u8")) {
-    if (el.canPlayType("application/vnd.apple.mpegurl")) {
-      el.src = url;
-    } else if (Hls.isSupported()) {
-      hlsInstance = new Hls();
-      hlsInstance.loadSource(url);
-      hlsInstance.attachMedia(el);
-      hlsInstance.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
-        qualityLevels.value = data.levels
-          .map((level, index) => ({ index, height: level.height }))
-          .filter((level) => level.height > 0)
-          .sort((a, b) => b.height - a.height)
-          .map((level) => ({ index: level.index, label: qualityLabel(level.height) }));
-        selectedQuality.value = -1;
-      });
-      // 瞬时故障自愈：后端重启等网络错误自动重试，媒体错误自动恢复
-      hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
-        if (!data.fatal) return;
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hlsInstance?.startLoad();
-        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hlsInstance?.recoverMediaError();
-      });
-    } else {
-      el.src = url;
-    }
+  if (!url.includes(".m3u8")) {
+    el.src = url;
+    return;
+  }
+  // destroyHls 会清空档位，这里用后端数据立即重建，保证菜单不等 hls.js 解析就能显示
+  qualityLevels.value = serverHeights.value.map((height) => ({ height, label: qualityLabel(height) }));
+  if (Hls.isSupported()) {
+    hlsInstance = new Hls();
+    hlsInstance.loadSource(url);
+    hlsInstance.attachMedia(el);
+    hlsInstance.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+      const parsed = [...new Set(data.levels.map((level) => level.height).filter((height) => height > 0))].sort((a, b) => b - a);
+      // hls.js 解析出的档位比后端声明更可靠，两者都为空时才留空菜单
+      if (parsed.length) {
+        qualityLevels.value = parsed.map((height) => ({ height, label: qualityLabel(height) }));
+      }
+      // 解析完成后补上之前选中的档位（用户可能在解析前已点选）
+      if (selectedQuality.value !== null) switchQuality(selectedQuality.value);
+    });
+    // 瞬时故障自愈：后端重启等网络错误自动重试，媒体错误自动恢复
+    hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
+      if (!data.fatal) return;
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hlsInstance?.startLoad();
+      else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hlsInstance?.recoverMediaError();
+    });
+  } else if (el.canPlayType("application/vnd.apple.mpegurl")) {
+    el.src = url;
   } else {
     el.src = url;
   }
 }
 
-function switchQuality(index: number) {
+function switchQuality(height: number | null) {
+  selectedQuality.value = height;
   if (!hlsInstance) return;
-  selectedQuality.value = index;
-  // -1 为自动，让 hls.js 按网速自适应；否则锁定指定档位（立即切换）
-  hlsInstance.currentLevel = index;
+  if (height === null) {
+    // 自动：交还给 hls.js 按带宽自适应
+    hlsInstance.currentLevel = -1;
+    return;
+  }
+  const level = hlsInstance.levels.findIndex((item) => item.height === height);
+  if (level >= 0) hlsInstance.currentLevel = level;
 }
 
 const navItems: { key: Page; label: string; icon: string }[] = [
@@ -1018,6 +1037,10 @@ async function openVideo(video: Video) {
     qualityMenuOpen.value = false;
     rateMenuOpen.value = false;
     danmakuSettingsOpen.value = false;
+    // 先用后端返回的转码档位渲染清晰度菜单，hls.js 解析完成后再用它校正
+    serverHeights.value = response.playUrl?.includes(".m3u8") ? renditionHeights(response.transcode?.renditions ?? []) : [];
+    qualityLevels.value = serverHeights.value.map((height) => ({ height, label: qualityLabel(height) }));
+    selectedQuality.value = null;
     comments.value = (
       await axios.get(`/api/videos/${video.id}/comments`)
     ).data.data;
@@ -1284,11 +1307,11 @@ onBeforeUnmount(() => {
                             <template v-if="qualityLevels.length">
                               <button
                                 v-for="quality in qualityLevels"
-                                :key="quality.index"
-                                :class="{ active: selectedQuality === quality.index }"
-                                @click="pickQuality(quality.index)"
+                                :key="quality.height"
+                                :class="{ active: selectedQuality === quality.height }"
+                                @click="pickQuality(quality.height)"
                               >{{ quality.label }}</button
-                              ><button :class="{ active: selectedQuality === -1 }" @click="pickQuality(-1)">自动</button>
+                              ><button :class="{ active: selectedQuality === null }" @click="pickQuality(null)">自动</button>
                             </template>
                             <button v-else disabled>原画（转码完成后可切换）</button>
                           </div>
