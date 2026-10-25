@@ -14,9 +14,13 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +38,31 @@ public class VideoController {
     }
     @Operation(summary = "获取视频详情和播放地址") @GetMapping("/{id}") public ApiResponse<Map<String, Object>> detail(@PathVariable long id) {
         return ApiResponse.ok(videoService.detail(id));
+    }
+    @Operation(summary = "获取 HLS 主播放列表", description = "转码完成后返回多清晰度主列表")
+    @GetMapping("/{id}/stream/master.m3u8")
+    public ResponseEntity<String> masterPlaylist(@PathVariable long id) {
+        return playlistResponse(videoService.masterPlaylist(id));
+    }
+    @Operation(summary = "获取 HLS 清晰度播放列表")
+    @GetMapping("/{id}/stream/{rendition}/index.m3u8")
+    public ResponseEntity<String> renditionPlaylist(@PathVariable long id, @PathVariable String rendition) {
+        return playlistResponse(videoService.renditionPlaylist(id, rendition));
+    }
+    @Operation(summary = "HLS 切片重定向", description = "302 跳转到 MinIO 临时地址")
+    @GetMapping("/{id}/stream/{rendition}/{segment}")
+    public ResponseEntity<Void> segment(@PathVariable long id, @PathVariable String rendition, @PathVariable String segment) {
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create(videoService.segmentUrl(id, rendition, segment)))
+                .build();
+    }
+    @Operation(summary = "重新发起转码", description = "仅视频作者可用，适用于转码失败或历史视频")
+    @PostMapping("/{id}/transcode")
+    public ApiResponse<Map<String, Object>> retranscode(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
+        return ApiResponse.ok(videoService.retranscode(authService.requireUserId(authorization), id));
+    }
+    private ResponseEntity<String> playlistResponse(String content) {
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/vnd.apple.mpegurl")).body(content);
     }
     @Operation(summary = "记录观看历史") @PostMapping("/{id}/history")
     public ApiResponse<Void> recordHistory(@RequestHeader("Authorization") String authorization, @PathVariable long id) {

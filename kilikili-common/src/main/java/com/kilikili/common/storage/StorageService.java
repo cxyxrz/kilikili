@@ -3,6 +3,7 @@ package com.kilikili.common.storage;
 import io.minio.BucketExistsArgs;
 import io.minio.ComposeObjectArgs;
 import io.minio.ComposeSource;
+import io.minio.GetObjectArgs;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
@@ -16,6 +17,10 @@ import org.springframework.web.multipart.MultipartFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -158,5 +163,36 @@ public class StorageService {
         String suffix = filename != null && filename.contains(".")
                 ? filename.substring(filename.lastIndexOf('.')) : ".mp4";
         return "videos/" + userId + "/" + UUID.randomUUID() + suffix;
+    }
+
+    public void downloadObject(String objectKey, Path target) {
+        try {
+            try (InputStream in = client.getObject(GetObjectArgs.builder().bucket(bucket).object(objectKey).build())) {
+                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (Exception exception) {
+            log.error("对象下载失败: objectKey={}", objectKey, exception);
+            throw new IllegalStateException("对象下载失败", exception);
+        }
+    }
+
+    public void uploadLocalFile(String objectKey, Path file, String contentType) {
+        try {
+            client.putObject(PutObjectArgs.builder().bucket(bucket).object(objectKey)
+                    .stream(Files.newInputStream(file), Files.size(file), -1)
+                    .contentType(contentType).build());
+        } catch (Exception exception) {
+            log.error("本地文件上传失败: objectKey={}, file={}", objectKey, file, exception);
+            throw new IllegalStateException("对象上传失败", exception);
+        }
+    }
+
+    public String readTextObject(String objectKey) {
+        try (InputStream in = client.getObject(GetObjectArgs.builder().bucket(bucket).object(objectKey).build())) {
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception exception) {
+            log.error("对象读取失败: objectKey={}", objectKey, exception);
+            throw new IllegalStateException("对象读取失败", exception);
+        }
     }
 }

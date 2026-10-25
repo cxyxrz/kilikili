@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import axios from "axios";
+import Hls from "hls.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 
 type User = { id: number; username: string; nickname: string };
@@ -142,6 +143,39 @@ const danmakuCanvas = ref<HTMLCanvasElement | null>(null);
 let danmakuFrame = 0;
 let searchTimer = 0;
 let notificationPoll = 0;
+let hlsInstance: Hls | null = null;
+const uploadSuccessVisible = ref(false);
+const uploadSuccessMessage = ref("");
+const uploadWarningVisible = ref(false);
+const uploadWarningMessage = ref("");
+
+function destroyHls() {
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
+  }
+}
+
+// HLS 地址交给 hls.js（Safari 走原生支持），普通 MP4 直接设置 src
+function attachVideoSource() {
+  const el = videoPlayer.value;
+  const url = playUrl.value;
+  if (!el || !url) return;
+  destroyHls();
+  if (url.includes(".m3u8")) {
+    if (el.canPlayType("application/vnd.apple.mpegurl")) {
+      el.src = url;
+    } else if (Hls.isSupported()) {
+      hlsInstance = new Hls();
+      hlsInstance.loadSource(url);
+      hlsInstance.attachMedia(el);
+    } else {
+      el.src = url;
+    }
+  } else {
+    el.src = url;
+  }
+}
 
 const navItems: { key: Page; label: string; icon: string }[] = [
   { key: "recommend", label: "推荐", icon: "▣" },
@@ -719,17 +753,23 @@ function navigate(page: Page) {
     loadCreatorStats();
   }
 }
+function showUploadWarning(message: string) {
+  uploadSuccessVisible.value = false;
+  uploadWarningMessage.value = message;
+  uploadWarningVisible.value = true;
+}
+
 async function sendUpload() {
   if (!upload.value.file) {
-    notice.value = "请选择视频文件";
+    showUploadWarning("「视频文件」未选择，请先选择要上传的视频");
     return;
   }
   if (!upload.value.cover) {
-    notice.value = "请上传视频封面";
+    showUploadWarning("「视频封面」未上传，请先选择封面图片");
     return;
   }
   if (!upload.value.title.trim()) {
-    notice.value = "请填写视频标题";
+    showUploadWarning("「视频标题」未填写，请填写后再提交");
     return;
   }
   try {
@@ -795,6 +835,10 @@ async function sendUpload() {
       ).data.data.message;
     }
 
+    uploadSuccessMessage.value = notice.value || "投稿提交成功";
+    uploadWarningVisible.value = false;
+    uploadSuccessVisible.value = true;
+
     if (coverPreview.value) URL.revokeObjectURL(coverPreview.value);
     coverPreview.value = "";
     upload.value = {
@@ -825,6 +869,7 @@ async function openVideo(video: Video) {
     ).data.data;
     await loadDanmakus(video.id);
     await nextTick();
+    attachVideoSource();
     startDanmakuRender();
     cancelReply();
     if (loggedIn.value) {
@@ -908,6 +953,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   stopDanmakuRender();
+  destroyHls();
   window.clearInterval(notificationPoll);
 });
 </script>
@@ -1030,7 +1076,7 @@ onBeforeUnmount(() => {
             <div class="watch-main">
               <section class="watch-player-card">
                 <div class="video-stage">
-                  <video ref="videoPlayer" v-if="playUrl" :src="playUrl" controls autoplay @loadedmetadata="startDanmakuRender" @seeked="startDanmakuRender"></video>
+                  <video ref="videoPlayer" v-if="playUrl" controls autoplay @loadedmetadata="startDanmakuRender" @seeked="startDanmakuRender"></video>
                   <canvas ref="danmakuCanvas" class="danmaku-canvas"></canvas>
                 </div>
                 <div v-if="loggedIn" class="danmaku-entry">
@@ -1829,6 +1875,35 @@ onBeforeUnmount(() => {
             authMode === "login" ? "没有账号？去注册" : "已有账号？去登录"
           }}</a>
         </p>
+      </section>
+    </div>
+
+    <div
+      v-if="uploadSuccessVisible"
+      class="modal-mask"
+      @click.self="uploadSuccessVisible = false"
+    >
+      <section class="auth-modal upload-success-modal">
+        <button class="close" @click="uploadSuccessVisible = false">×</button>
+        <div class="success-icon">✓</div>
+        <h2>上传成功</h2>
+        <p>{{ uploadSuccessMessage }}</p>
+        <p class="muted">视频正在后台转码，完成后将支持多清晰度播放</p>
+        <button class="primary" @click="uploadSuccessVisible = false">知道了</button>
+      </section>
+    </div>
+
+    <div
+      v-if="uploadWarningVisible"
+      class="modal-mask"
+      @click.self="uploadWarningVisible = false"
+    >
+      <section class="auth-modal upload-success-modal">
+        <button class="close" @click="uploadWarningVisible = false">×</button>
+        <div class="success-icon warning">!</div>
+        <h2>无法上传</h2>
+        <p>{{ uploadWarningMessage }}</p>
+        <button class="primary" @click="uploadWarningVisible = false">去填写</button>
       </section>
     </div>
   </div>

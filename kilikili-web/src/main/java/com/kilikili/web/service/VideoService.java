@@ -3,8 +3,10 @@ package com.kilikili.web.service;
 import com.kilikili.common.exception.BusinessException;
 import com.kilikili.common.storage.StorageService;
 import com.kilikili.common.setting.SystemSettingService;
+import com.kilikili.web.entity.TranscodeTask;
 import com.kilikili.web.entity.Video;
 import com.kilikili.web.entity.VideoComment;
+import com.kilikili.web.entity.VideoInsert;
 import com.kilikili.web.entity.CreatorVideoItem;
 import com.kilikili.web.entity.CreatorVideoSource;
 import com.kilikili.web.entity.HistoryVideoItem;
@@ -12,7 +14,9 @@ import com.kilikili.web.entity.HistoryVideoSource;
 import com.kilikili.web.entity.Danmaku;
 import com.kilikili.web.entity.FavoriteVideoItem;
 import com.kilikili.web.entity.FavoriteVideoSource;
+import com.kilikili.web.mapper.TranscodeTaskMapper;
 import com.kilikili.web.mapper.VideoMapper;
+import com.kilikili.web.transcode.TranscodeService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -33,6 +37,8 @@ public class VideoService {
     private final StorageService storageService;
     private final NotificationService notificationService;
     private final SystemSettingService systemSettingService;
+    private final TranscodeTaskMapper transcodeTaskMapper;
+    private final TranscodeService transcodeService;
     private final ConcurrentHashMap<String, UploadSession> uploadSessions = new ConcurrentHashMap<>();
 
     private record UploadSession(long userId, String objectKey, String contentType,
@@ -43,11 +49,15 @@ public class VideoService {
         }
     }
 
-    public VideoService(VideoMapper videoMapper, StorageService storageService, NotificationService notificationService, SystemSettingService systemSettingService) {
+    public VideoService(VideoMapper videoMapper, StorageService storageService, NotificationService notificationService,
+                        SystemSettingService systemSettingService, TranscodeTaskMapper transcodeTaskMapper,
+                        TranscodeService transcodeService) {
         this.videoMapper = videoMapper;
         this.storageService = storageService;
         this.notificationService = notificationService;
         this.systemSettingService = systemSettingService;
+        this.transcodeTaskMapper = transcodeTaskMapper;
+        this.transcodeService = transcodeService;
     }
 
     @Transactional
@@ -62,9 +72,11 @@ public class VideoService {
         String coverObjectKey = storageService.uploadCover(cover, userId);
         boolean reviewEnabled = systemSettingService.isEnabled(SystemSettingService.VIDEO_REVIEW_ENABLED);
         String status = reviewEnabled ? "PENDING_REVIEW" : "PUBLISHED";
-        videoMapper.insert(userId, title, description, objectKey, coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
-        log.info("视频投稿已创建: userId={}, title={}, status={}", userId, title, status);
-        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核" : "上传成功，已自动发布", "status", status);
+        VideoInsert insert = new VideoInsert(userId, title, description, objectKey, coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
+        videoMapper.insertReturningId(insert);
+        transcodeService.submit(insert.getId());
+        log.info("视频投稿已创建: videoId={}, userId={}, title={}, status={}", insert.getId(), userId, title, status);
+        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status);
     }
 
     public Map<String, Object> initUpload(long userId, String filename, String contentType) {
@@ -110,9 +122,11 @@ public class VideoService {
         String coverObjectKey = storageService.uploadCover(cover, userId);
         boolean reviewEnabled = systemSettingService.isEnabled(SystemSettingService.VIDEO_REVIEW_ENABLED);
         String status = reviewEnabled ? "PENDING_REVIEW" : "PUBLISHED";
-        videoMapper.insert(userId, title, description, session.objectKey(), coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
-        log.info("分片上传视频投稿已创建: userId={}, title={}, status={}, parts={}", userId, title, status, sortedPartKeys.size());
-        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核" : "上传成功，已自动发布", "status", status);
+        VideoInsert insert = new VideoInsert(userId, title, description, session.objectKey(), coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
+        videoMapper.insertReturningId(insert);
+        transcodeService.submit(insert.getId());
+        log.info("分片上传视频投稿已创建: videoId={}, userId={}, title={}, status={}, parts={}", insert.getId(), userId, title, status, sortedPartKeys.size());
+        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status);
     }
 
     private UploadSession requireUploadSession(String sessionId, long userId) {
@@ -129,7 +143,61 @@ public class VideoService {
         if (!"PUBLISHED".equals(video.status())) throw new BusinessException("视频暂不可播放");
         videoMapper.increaseViews(id);
         log.info("视频开始播放: videoId={}, authorId={}", id, video.authorId());
-        return Map.of("video", displayVideo(video), "playUrl", storageService.presignedReadUrl(video.objectKey()));
+        TranscodeTask task = transcodeTaskMapper.findLatestByVideoId(id);
+        Map<String, Object> transcodeInfo;
+        String playUrl;
+        if (task != null && "COMPLETED".equals(task.status()) && task.hlsPlaylistKey() != null) {
+            playUrl = "/api/videos/" + id + "/stream/master.m3u8";
+            transcodeInfo = Map.of("status", "READY",
+                    "renditions", task.renditions() == null ? List.of() : List.of(task.renditions().split(",")));
+        } else {
+            playUrl = storageService.presignedReadUrl(video.objectKey());
+            transcodeInfo = Map.of("status", task == null ? "NONE" : task.status());
+        }
+        return Map.of("video", displayVideo(video), "playUrl", playUrl, "transcode", transcodeInfo);
+    }
+
+    public String masterPlaylist(long videoId) {
+        TranscodeTask task = requireReadyTask(videoId);
+        return storageService.readTextObject(task.hlsPlaylistKey());
+    }
+
+    public String renditionPlaylist(long videoId, String rendition) {
+        TranscodeTask task = requireReadyTask(videoId);
+        requireRendition(task, rendition);
+        String playlistKey = task.hlsPlaylistKey();
+        return storageService.readTextObject(playlistKey.substring(0, playlistKey.lastIndexOf('/') + 1) + rendition + "/index.m3u8");
+    }
+
+    public String segmentUrl(long videoId, String rendition, String segment) {
+        if (!segment.matches("seg_\\d{5}\\.ts")) throw new BusinessException("非法的切片名称");
+        TranscodeTask task = requireReadyTask(videoId);
+        requireRendition(task, rendition);
+        String playlistKey = task.hlsPlaylistKey();
+        String prefix = playlistKey.substring(0, playlistKey.lastIndexOf('/') + 1);
+        return storageService.presignedReadUrl(prefix + rendition + "/" + segment);
+    }
+
+    @Transactional
+    public Map<String, Object> retranscode(long userId, long videoId) {
+        Video video = requireVideo(videoId);
+        if (video.authorId() != userId) throw new BusinessException("仅视频作者可重新转码");
+        transcodeService.submit(videoId);
+        return Map.of("message", "转码任务已提交");
+    }
+
+    private TranscodeTask requireReadyTask(long videoId) {
+        Video video = requireVideo(videoId);
+        if (!"PUBLISHED".equals(video.status())) throw new BusinessException("视频暂不可播放");
+        TranscodeTask task = transcodeTaskMapper.findLatestByVideoId(videoId);
+        if (task == null || !"COMPLETED".equals(task.status()) || task.hlsPlaylistKey() == null)
+            throw new BusinessException("视频尚未完成转码");
+        return task;
+    }
+
+    private void requireRendition(TranscodeTask task, String rendition) {
+        List<String> available = task.renditions() == null ? List.of() : List.of(task.renditions().split(","));
+        if (!available.contains(rendition)) throw new BusinessException("不支持的清晰度: " + rendition);
     }
 
     @Transactional

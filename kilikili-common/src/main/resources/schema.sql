@@ -139,6 +139,22 @@ CREATE TABLE IF NOT EXISTS user_notification (
   INDEX idx_notification_recipient_type (recipient_id, type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS transcode_task (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  video_id BIGINT NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+  attempt_count INT NOT NULL DEFAULT 0,
+  max_attempts INT NOT NULL DEFAULT 3,
+  error_message VARCHAR(1000),
+  hls_playlist_key VARCHAR(500),
+  renditions VARCHAR(200),
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_transcode_status_created (status, created_at),
+  INDEX idx_transcode_video (video_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS admin_operation_log (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   operator_id BIGINT NULL,

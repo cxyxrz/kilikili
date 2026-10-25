@@ -2,6 +2,7 @@ package com.kilikili.web.mapper;
 
 import com.kilikili.web.entity.Video;
 import com.kilikili.web.entity.VideoComment;
+import com.kilikili.web.entity.VideoInsert;
 import com.kilikili.web.entity.CreatorVideoSource;
 import com.kilikili.web.entity.HistoryVideoSource;
 import com.kilikili.web.entity.Danmaku;
@@ -60,6 +61,10 @@ public interface VideoMapper {
 
     @Insert("INSERT INTO video(author_id,title,description,object_key,cover_object_key,category_id,duration_seconds,creation_declaration,status) VALUES(#{authorId},#{title},#{description},#{objectKey},#{coverObjectKey},#{categoryId},#{durationSeconds},#{creationDeclaration},#{status})")
     int insert(@Param("authorId") long authorId, @Param("title") String title, @Param("description") String description, @Param("objectKey") String objectKey, @Param("coverObjectKey") String coverObjectKey, @Param("categoryId") long categoryId, @Param("durationSeconds") int durationSeconds, @Param("creationDeclaration") String creationDeclaration, @Param("status") String status);
+
+    @Insert("INSERT INTO video(author_id,title,description,object_key,cover_object_key,category_id,duration_seconds,creation_declaration,status) VALUES(#{authorId},#{title},#{description},#{objectKey},#{coverObjectKey},#{categoryId},#{durationSeconds},#{creationDeclaration},#{status})")
+    @Options(useGeneratedKeys = true, keyProperty = "id")
+    int insertReturningId(VideoInsert video);
 
     @Update("UPDATE video SET view_count=view_count+1 WHERE id=#{id}")
     int increaseViews(long id);

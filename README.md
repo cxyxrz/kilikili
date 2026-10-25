@@ -30,9 +30,9 @@ flowchart TB
         MinIO[("MinIO<br/>视频 · 封面 · 用户头像")]
     end
 
-    subgraph Extension["预留扩展（尚未完整接入）"]
-        FFmpeg["FFmpeg<br/>异步转码 / 截帧"]
-        DeepSeek["DeepSeek LLM<br/>AI 审核 / 内容优化"]
+    subgraph Extension["扩展能力"]
+        FFmpeg["FFmpeg<br/>多清晰度转码 / HLS 切片（已接入）"]
+        DeepSeek["DeepSeek LLM<br/>AI 审核 / 内容优化（规划中）"]
     end
 
     WebUI --> WebProxy --> WebAPI
@@ -42,7 +42,7 @@ flowchart TB
     Common --> MySQL
     Common --> Redis
     Common --> MinIO
-    WebAPI -.规划.-> FFmpeg
+    WebAPI --> FFmpeg
     AdminAPI -.规划.-> DeepSeek
 ```
 
@@ -51,7 +51,7 @@ flowchart TB
 1. 用户端和管理端分别通过 Vite 的 `/api/*` 代理访问对应的 Spring Boot 服务。
 2. 两个后端模块复用 `kilikili-common` 中的认证、存储、数据库访问、统一响应、日志和接口文档能力。
 3. MySQL 保存用户、视频、互动、审核及系统配置；Redis 保存登录会话并缓存推荐结果；MinIO 保存视频、封面和头像。
-4. FFmpeg 与 DeepSeek 作为后续转码和 AI 审核能力的扩展点，在图中使用虚线标识。
+4. FFmpeg 转码流水线已接入用户端（见下文），DeepSeek AI 审核仍为规划中的扩展点。
 
 ## 项目结构
 
@@ -112,6 +112,18 @@ mvn -pl kilikili-admin -am spring-boot:run
 | `GET /api/videos/{id}` | 获取播放用的 MinIO 临时地址 |
 | `POST /api/videos/{id}/like` | 点赞/取消点赞 |
 | `GET/POST /api/videos/{id}/comments` | 获取/发布评论 |
+| `GET /api/videos/{id}/stream/master.m3u8` | HLS 主播放列表（转码完成后） |
+| `POST /api/videos/{id}/transcode` | 作者重新发起转码 |
+
+## 视频转码流水线
+
+上传视频后自动创建 `transcode_task` 异步任务，由后台轮询执行：
+
+1. 从 MinIO 下载原片，ffprobe 识别源分辨率；
+2. 通过 Docker 调用 FFmpeg（默认镜像 `mwader/static-ffmpeg`，需先 `docker pull mwader/static-ffmpeg`）转出多清晰度 HLS 切片（480p/720p/1080p，按源分辨率自动裁剪档位）；
+3. 切片回传 MinIO；播放时优先返回 HLS 地址，切片请求经 302 跳转到 MinIO 临时地址，转码未完成时回退原片直链。
+
+任务失败自动重试（默认 3 次），服务重启后运行中的任务自动恢复排队。前端使用 hls.js 自适应播放。相关配置见 `kilikili-web/src/main/resources/application.yml` 的 `kilikili.transcode`，`executor` 支持 `docker`（默认）与 `direct`（直接调用宿主机 ffmpeg 二进制）两种方式。
 
 ## 管理后台
 

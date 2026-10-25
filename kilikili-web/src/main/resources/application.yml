@@ -21,6 +21,29 @@ kilikili:
     access-key: ${MINIO_ACCESS_KEY:minioadmin}
     secret-key: ${MINIO_SECRET_KEY:minioadmin}
     bucket: ${MINIO_BUCKET:kilikili}
+  transcode:
+    enabled: ${TRANSCODE_ENABLED:true}
+    executor: ${TRANSCODE_EXECUTOR:docker}
+    docker-image: ${TRANSCODE_DOCKER_IMAGE:mwader/static-ffmpeg}
+    ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
+    ffprobe-path: ${FFPROBE_PATH:ffprobe}
+    work-dir: ${TRANSCODE_WORK_DIR:/tmp/kilikili-transcode}
+    poll-interval-ms: ${TRANSCODE_POLL_INTERVAL_MS:10000}
+    max-attempts: ${TRANSCODE_MAX_ATTEMPTS:3}
+    max-concurrency: ${TRANSCODE_MAX_CONCURRENCY:2}
+    renditions:
+      - name: 480p
+        height: 480
+        video-bitrate: 1400k
+        audio-bitrate: 96k
+      - name: 720p
+        height: 720
+        video-bitrate: 2800k
+        audio-bitrate: 128k
+      - name: 1080p
+        height: 1080
+        video-bitrate: 5000k
+        audio-bitrate: 192k
 
 management:
   endpoints:
