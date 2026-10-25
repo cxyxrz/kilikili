@@ -6,14 +6,14 @@ spring:
   datasource:
     url: ${MYSQL_URL:jdbc:mysql://localhost:3306/kilikili?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true}
     username: ${MYSQL_USERNAME:root}
-    password: ${MYSQL_PASSWORD:123456}
+    password: ${MYSQL_PASSWORD:jobclaw}
   servlet:
     multipart:
       max-file-size: 20MB
       max-request-size: 20MB
   sql:
     init:
-      mode: never
+      mode: always
 
 kilikili:
   storage:

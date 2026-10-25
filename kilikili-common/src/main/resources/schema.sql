@@ -14,12 +14,6 @@ CREATE TABLE IF NOT EXISTS account (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-ALTER TABLE account ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE';
-ALTER TABLE account ADD COLUMN IF NOT EXISTS role VARCHAR(16) NOT NULL DEFAULT 'USER';
-ALTER TABLE account ADD COLUMN IF NOT EXISTS gender VARCHAR(16) NOT NULL DEFAULT 'PRIVATE';
-ALTER TABLE account ADD COLUMN IF NOT EXISTS birthday DATE NULL;
-ALTER TABLE account ADD COLUMN IF NOT EXISTS bio VARCHAR(200) NULL;
-
 CREATE TABLE IF NOT EXISTS video (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   author_id BIGINT NOT NULL,
@@ -39,12 +33,6 @@ CREATE TABLE IF NOT EXISTS video (
   INDEX idx_video_status_created (status, created_at),
   INDEX idx_video_author (author_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-ALTER TABLE video ADD COLUMN IF NOT EXISTS category_id BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE video ADD COLUMN IF NOT EXISTS cover_object_key VARCHAR(500) NULL;
-ALTER TABLE video ADD COLUMN IF NOT EXISTS duration_seconds INT NOT NULL DEFAULT 0;
-ALTER TABLE video ADD COLUMN IF NOT EXISTS creation_declaration VARCHAR(16) NOT NULL DEFAULT 'ORIGINAL';
-ALTER TABLE video ADD INDEX IF NOT EXISTS idx_video_recommend (status, category_id, created_at);
 
 CREATE TABLE IF NOT EXISTS category (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -117,9 +105,6 @@ CREATE TABLE IF NOT EXISTS video_comment (
   INDEX idx_comment_video_created (video_id, created_at),
   INDEX idx_comment_parent_created (parent_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-ALTER TABLE video_comment ADD COLUMN IF NOT EXISTS parent_id BIGINT NULL;
-ALTER TABLE video_comment ADD INDEX IF NOT EXISTS idx_comment_parent_created (parent_id, created_at);
 
 CREATE TABLE IF NOT EXISTS video_view_history (
   user_id BIGINT NOT NULL,

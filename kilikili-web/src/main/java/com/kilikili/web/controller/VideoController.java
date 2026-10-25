@@ -74,6 +74,36 @@ public class VideoController {
                                                      @RequestPart MultipartFile file) {
         return ApiResponse.ok(videoService.upload(authService.requireUserId(authorization), title, description, categoryId, durationSeconds, creationDeclaration, cover, file));
     }
+
+    @Operation(summary = "初始化分片上传", description = "大文件分片上传第一步，返回sessionId")
+    @PostMapping("/upload/init")
+    public ApiResponse<Map<String, Object>> initUpload(@RequestHeader("Authorization") String authorization,
+                                                        @RequestParam String filename,
+                                                        @RequestParam String contentType) {
+        return ApiResponse.ok(videoService.initUpload(authService.requireUserId(authorization), filename, contentType));
+    }
+
+    @Operation(summary = "上传分片", description = "大文件分片上传第二步，逐片上传")
+    @PutMapping(value = "/upload/chunk", consumes = "multipart/form-data")
+    public ApiResponse<Map<String, Object>> uploadChunk(@RequestHeader("Authorization") String authorization,
+                                                         @RequestParam String sessionId,
+                                                         @RequestParam int partNumber,
+                                                         @RequestPart MultipartFile chunk) {
+        return ApiResponse.ok(videoService.uploadChunk(authService.requireUserId(authorization), sessionId, partNumber, chunk));
+    }
+
+    @Operation(summary = "完成分片上传", description = "大文件分片上传第三步，合并分片并创建视频记录")
+    @PostMapping(value = "/upload/complete", consumes = "multipart/form-data")
+    public ApiResponse<Map<String, Object>> completeUpload(@RequestHeader("Authorization") String authorization,
+                                                            @RequestParam String sessionId,
+                                                            @RequestParam @NotBlank @Size(max = 80) String title,
+                                                            @RequestParam(required = false, defaultValue = "") @Size(max = 2000) String description,
+                                                            @RequestParam(defaultValue = "1") long categoryId,
+                                                            @RequestParam(defaultValue = "0") int durationSeconds,
+                                                            @RequestParam(defaultValue = "ORIGINAL") String creationDeclaration,
+                                                            @RequestPart MultipartFile cover) {
+        return ApiResponse.ok(videoService.completeUpload(authService.requireUserId(authorization), sessionId, title, description, categoryId, durationSeconds, creationDeclaration, cover));
+    }
     @Operation(summary = "点赞或取消点赞") @PostMapping("/{id}/like") public ApiResponse<Map<String, Object>> like(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
         return ApiResponse.ok(videoService.toggleLike(authService.requireUserId(authorization), id));
     }

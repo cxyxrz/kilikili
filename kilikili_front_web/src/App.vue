@@ -733,17 +733,68 @@ async function sendUpload() {
     return;
   }
   try {
-    const form = new FormData();
-    form.append("title", upload.value.title);
-    form.append("description", upload.value.description);
-    form.append("categoryId", String(upload.value.categoryId));
-    form.append("durationSeconds", String(upload.value.durationSeconds));
-    form.append("creationDeclaration", upload.value.creationDeclaration);
-    form.append("cover", upload.value.cover);
-    form.append("file", upload.value.file);
-    notice.value = (
-      await axios.post("/api/videos/upload", form, { headers: authHeaders() })
-    ).data.data.message;
+    const file = upload.value.file;
+    const CHUNK_SIZE = 5 * 1024 * 1024;
+    const totalParts = Math.ceil(file.size / CHUNK_SIZE);
+    const isLargeFile = file.size > CHUNK_SIZE;
+
+    if (isLargeFile) {
+      const initRes = (
+        await axios.post(
+          "/api/videos/upload/init",
+          null,
+          {
+            params: { filename: file.name, contentType: file.type || "video/mp4" },
+            headers: authHeaders(),
+          },
+        )
+      ).data.data;
+      const sessionId = initRes.sessionId;
+
+      for (let i = 0; i < totalParts; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+        const chunkForm = new FormData();
+        chunkForm.append("chunk", chunk, file.name);
+        await axios.put("/api/videos/upload/chunk", chunkForm, {
+          params: { sessionId, partNumber: i + 1 },
+          headers: { ...authHeaders(), "Content-Type": "multipart/form-data" },
+        });
+        notice.value = `上传中... ${Math.round(((i + 1) / totalParts) * 100)}%`;
+      }
+
+      const completeForm = new FormData();
+      completeForm.append("title", upload.value.title);
+      completeForm.append("description", upload.value.description);
+      completeForm.append("categoryId", String(upload.value.categoryId));
+      completeForm.append("durationSeconds", String(upload.value.durationSeconds));
+      completeForm.append("creationDeclaration", upload.value.creationDeclaration);
+      completeForm.append("cover", upload.value.cover);
+      notice.value = (
+        await axios.post(
+          "/api/videos/upload/complete",
+          completeForm,
+          {
+            params: { sessionId },
+            headers: { ...authHeaders(), "Content-Type": "multipart/form-data" },
+          },
+        )
+      ).data.data.message;
+    } else {
+      const form = new FormData();
+      form.append("title", upload.value.title);
+      form.append("description", upload.value.description);
+      form.append("categoryId", String(upload.value.categoryId));
+      form.append("durationSeconds", String(upload.value.durationSeconds));
+      form.append("creationDeclaration", upload.value.creationDeclaration);
+      form.append("cover", upload.value.cover);
+      form.append("file", upload.value.file);
+      notice.value = (
+        await axios.post("/api/videos/upload", form, { headers: authHeaders() })
+      ).data.data.message;
+    }
+
     if (coverPreview.value) URL.revokeObjectURL(coverPreview.value);
     coverPreview.value = "";
     upload.value = {

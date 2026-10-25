@@ -19,16 +19,30 @@ import org.springframework.web.multipart.MultipartFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class VideoService {
     private static final Logger log = LoggerFactory.getLogger(VideoService.class);
+    private static final long UPLOAD_SESSION_TTL_SECONDS = 3600;
     private final VideoMapper videoMapper;
     private final StorageService storageService;
     private final NotificationService notificationService;
     private final SystemSettingService systemSettingService;
+    private final ConcurrentHashMap<String, UploadSession> uploadSessions = new ConcurrentHashMap<>();
+
+    private record UploadSession(long userId, String objectKey, String contentType,
+                                 ConcurrentHashMap<Integer, String> partKeys,
+                                 Instant createdAt) {
+        boolean isExpired() {
+            return Instant.now().isAfter(createdAt.plusSeconds(UPLOAD_SESSION_TTL_SECONDS));
+        }
+    }
+
     public VideoService(VideoMapper videoMapper, StorageService storageService, NotificationService notificationService, SystemSettingService systemSettingService) {
         this.videoMapper = videoMapper;
         this.storageService = storageService;
@@ -51,6 +65,61 @@ public class VideoService {
         videoMapper.insert(userId, title, description, objectKey, coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
         log.info("视频投稿已创建: userId={}, title={}, status={}", userId, title, status);
         return Map.of("message", reviewEnabled ? "上传成功，正在等待审核" : "上传成功，已自动发布", "status", status);
+    }
+
+    public Map<String, Object> initUpload(long userId, String filename, String contentType) {
+        if (contentType == null || !contentType.startsWith("video/")) throw new BusinessException("仅支持视频文件");
+        String objectKey = storageService.generateVideoObjectKey(userId, filename);
+        String sessionId = UUID.randomUUID().toString();
+        uploadSessions.put(sessionId, new UploadSession(userId, objectKey, contentType, new ConcurrentHashMap<>(), Instant.now()));
+        log.info("分片上传已初始化: userId={}, sessionId={}, objectKey={}", userId, sessionId, objectKey);
+        return Map.of("sessionId", sessionId, "objectKey", objectKey);
+    }
+
+    public Map<String, Object> uploadChunk(long userId, String sessionId, int partNumber, MultipartFile chunk) {
+        UploadSession session = requireUploadSession(sessionId, userId);
+        if (session.isExpired()) {
+            uploadSessions.remove(sessionId);
+            throw new BusinessException("上传会话已过期，请重新初始化");
+        }
+        String partKey = storageService.uploadChunk(session.objectKey(), partNumber, chunk);
+        session.partKeys().put(partNumber, partKey);
+        log.info("分片已接收: userId={}, sessionId={}, part={}/{}, size={}", userId, sessionId, partNumber, session.partKeys().size(), chunk.getSize());
+        return Map.of("partNumber", partNumber);
+    }
+
+    @Transactional
+    public Map<String, Object> completeUpload(long userId, String sessionId,
+                                              String title, String description,
+                                              long categoryId, int durationSeconds,
+                                              String creationDeclaration,
+                                              MultipartFile cover) {
+        UploadSession session = requireUploadSession(sessionId, userId);
+        if (session.partKeys().isEmpty()) throw new BusinessException("未上传任何分片");
+        if (!("ORIGINAL".equals(creationDeclaration) || "REPRINT".equals(creationDeclaration))) throw new BusinessException("创作声明不合法");
+        if (durationSeconds < 0 || durationSeconds > 24 * 60 * 60) throw new BusinessException("视频时长不合法");
+        if (cover == null || cover.isEmpty()) throw new BusinessException("请上传封面");
+
+        List<String> sortedPartKeys = session.partKeys().keySet().stream()
+                .sorted()
+                .map(key -> session.partKeys().get(key))
+                .toList();
+        storageService.composeChunks(session.objectKey(), sortedPartKeys, session.contentType());
+        uploadSessions.remove(sessionId);
+
+        String coverObjectKey = storageService.uploadCover(cover, userId);
+        boolean reviewEnabled = systemSettingService.isEnabled(SystemSettingService.VIDEO_REVIEW_ENABLED);
+        String status = reviewEnabled ? "PENDING_REVIEW" : "PUBLISHED";
+        videoMapper.insert(userId, title, description, session.objectKey(), coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
+        log.info("分片上传视频投稿已创建: userId={}, title={}, status={}, parts={}", userId, title, status, sortedPartKeys.size());
+        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核" : "上传成功，已自动发布", "status", status);
+    }
+
+    private UploadSession requireUploadSession(String sessionId, long userId) {
+        UploadSession session = uploadSessions.get(sessionId);
+        if (session == null) throw new BusinessException("上传会话不存在");
+        if (session.userId() != userId) throw new BusinessException("无权操作此上传会话");
+        return session;
     }
 
     public List<Video> list() { return videoMapper.listPublished(30).stream().map(this::displayVideo).toList(); }
