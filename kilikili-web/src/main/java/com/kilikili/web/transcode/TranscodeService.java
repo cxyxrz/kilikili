@@ -233,9 +233,10 @@ public class TranscodeService {
     private String runCommand(Path taskDir, String binary, List<String> args) throws Exception {
         List<String> command = new ArrayList<>();
         if (properties.useDocker()) {
+            // scratch 镜像无 PATH，二进制在根目录，需用绝对路径作为 entrypoint
             command.add("docker");
             command.addAll(List.of("run", "--rm", "-v", taskDir.toAbsolutePath() + ":/work",
-                    "--entrypoint", binary, properties.dockerImage()));
+                    "--entrypoint", "/" + binary, properties.dockerImage()));
         } else {
             command.add("ffmpeg".equals(binary) ? properties.ffmpegPath() : properties.ffprobePath());
         }

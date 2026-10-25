@@ -66,17 +66,10 @@
 .watch-layout { display: grid; grid-template-columns: minmax(620px, 1fr) 436px; gap: 28px; width: min(100%, 1594px); padding: 22px 0 40px; }
 .watch-main { min-width: 0; }
 .watch-player-card { overflow: hidden; background: #fff; border: 1px solid #e1e4ea; border-radius: 14px; box-shadow: 0 8px 24px #25304912; }
-.watch-player-card video { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: none; background: #000; border-radius: 0; }
-.video-stage { position: relative; width: 100%; background: #000; }
+/* 播放区固定 16:9，HLS(MSE) 视频无固有尺寸，不能依赖内容撑高 */
+.video-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; max-height: 78vh; overflow: hidden; background: #000; }
+.video-stage video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: 0; }
 .danmaku-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.danmaku-entry { display: flex; align-items: center; gap: 10px; padding: 18px 14px 10px; }
-.danmaku-entry input { min-width: 0; height: 43px; flex: 1; padding: 0 19px; color: #5f6d80; background: #f0f1f5; border: 0; border-radius: 24px; outline-color: #8077ff; }
-.danmaku-entry button { width: 80px; height: 43px; color: #fff; background: #aca5fd; border-radius: 24px; font-weight: 700; }
-.danmaku-tools { display: flex; gap: 1px; padding: 0 14px 12px; }
-.danmaku-tools button { min-width: 54px; height: 29px; padding: 0 11px; color: #647187; background: #fff; border: 1px solid #e3e6ed; font-size: 13px; }
-.danmaku-tools button:first-child { border-radius: 4px 0 0 4px; }
-.danmaku-tools .active { color: #fff; background: #4d9df4; border-color: #4d9df4; }
-.danmaku-tools .danmaku-setting { min-width: 29px; margin-left: 10px; padding: 0; border-radius: 4px; }
 .danmaku-color { display: grid; width: 30px; height: 29px; margin-left: 10px; overflow: hidden; place-items: center; background: #fff; border: 1px solid #e3e6ed; border-radius: 4px; cursor: pointer; }
 .danmaku-color input { width: 24px; height: 24px; padding: 0; background: transparent; border: 0; cursor: pointer; }
 .watch-detail-card { position: relative; min-height: 180px; margin-top: 14px; padding: 24px 25px; background: #fff; border: 1px solid #e1e4ea; border-radius: 14px; box-shadow: 0 8px 24px #2530490b; }
@@ -226,3 +219,77 @@
 .dark .following-empty { background: #20232f; border-color: #3b4352; }
 .upload-success-modal { text-align: center; } .upload-success-modal h2 { margin: 0; } .upload-success-modal .muted { font-size: 13px; } .success-icon { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto; color: #fff; font-size: 34px; font-weight: 800; background: #35b66d; border-radius: 50%; } .upload-success-modal .primary { margin-top: 8px; }
 .success-icon.warning { background: #f5a623; }
+.quality-select { margin-left: auto; height: 30px; padding: 0 8px; color: #5b6675; background: #fff; border: 1px solid #d5dbe4; border-radius: 5px; outline-color: #5a9eff; } .dark .quality-select { color: #d4d9e3; background: #272b39; border-color: #3c4354; }
+.quality-switch { display: flex; gap: 1px; margin-left: auto; } .quality-switch button { min-width: 54px; height: 29px; padding: 0 11px; color: #647187; background: #fff; border: 1px solid #e3e6ed; border-radius: 4px; font-size: 13px; } .quality-switch .active { color: #fff; background: #4d9df4; border-color: #4d9df4; } .dark .quality-switch button { color: #b8c1d0; background: #292e3c; border-color: #3a4151; }
+
+/* ===== B站风格深色播放页 ===== */
+.content:has(.watch-layout) { background: #18191c; padding-left: 32px; padding-right: 32px; }
+.watch-layout { grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; width: min(100%, 1840px); }
+.watch-player-card { background: #1f2024; border: 0; box-shadow: none; }
+.video-stage video { cursor: pointer; }
+/* ===== B站风格播放控制栏 ===== */
+.player-bar { position: absolute; right: 0; bottom: 0; left: 0; z-index: 5; padding: 0 14px 6px; background: linear-gradient(180deg, transparent 0%, #0000008c 28%, #000000d9 100%); }
+.player-progress { position: relative; height: 3px; margin-bottom: 4px; background: #ffffff4d; border-radius: 2px; cursor: pointer; transition: height .12s; }
+.player-progress:hover { height: 5px; }
+.player-progress-played { position: absolute; top: 0; bottom: 0; left: 0; background: #fb7299; border-radius: 2px; }
+.player-progress-played::after { content: ""; position: absolute; right: -4px; top: 50%; width: 9px; height: 9px; background: #fff; border-radius: 50%; transform: translateY(-50%); box-shadow: 0 1px 4px #00000080; }
+.player-bar-inner { display: flex; align-items: center; gap: 6px; height: 40px; color: #fff; }
+.pb-icon { display: grid; width: 32px; height: 32px; place-items: center; color: #fff; background: transparent; border-radius: 4px; font-size: 14px; font-weight: 700; }
+.pb-icon:hover { background: #ffffff1f; }
+.pb-icon.off { color: #8b9099; }
+.pb-danmaku-toggle { font-size: 13px; font-weight: 800; }
+.pb-time { color: #e3e5e7; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pb-menu-wrap { position: relative; }
+.pb-text { height: 30px; padding: 0 8px; color: #e3e5e7; background: transparent; border-radius: 4px; font-size: 13px; white-space: nowrap; }
+.pb-text:hover { color: #fb7299; }
+.pb-danmaku-input { display: flex; width: 240px; height: 28px; margin-left: 4px; overflow: hidden; background: #ffffff1f; border: 1px solid #ffffff33; border-radius: 4px; }
+.pb-danmaku-input input { min-width: 0; flex: 1; padding: 0 10px; color: #fff; background: transparent; border: 0; outline: none; font-size: 12px; }
+.pb-danmaku-input input::placeholder { color: #b6bac1; }
+.pb-danmaku-input input:disabled { cursor: pointer; }
+.pb-danmaku-input button { padding: 0 12px; color: #fff; background: #ffffff26; font-size: 12px; }
+.pb-danmaku-input button:hover { background: #fb7299; }
+.pb-right { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.pb-volume { width: 68px; height: 4px; accent-color: #fb7299; cursor: pointer; }
+.pb-menu { position: absolute; right: 0; bottom: 34px; z-index: 6; }
+.pb-popover { position: absolute; bottom: 36px; left: -70px; z-index: 6; padding: 8px; background: #1b1b1dee; border-radius: 8px; box-shadow: 0 4px 20px #00000066; backdrop-filter: blur(10px); }
+.pb-danmaku-modes { display: flex; gap: 2px; }
+.pb-danmaku-modes button { min-width: 52px; height: 28px; padding: 0 10px; color: #c2c5cc; background: #ffffff14; border-radius: 4px; font-size: 12px; }
+.pb-danmaku-modes button.active { color: #fff; background: #fb7299; }
+.watch-layout.theater { grid-template-columns: minmax(0, 1fr); width: 100%; }
+.watch-layout.theater .related-section { display: none; }
+.quality-menu { overflow: hidden; min-width: 158px; padding: 6px 0; background: #1b1b1dee; border-radius: 8px; box-shadow: 0 4px 20px #00000066; backdrop-filter: blur(10px); }
+.quality-menu button { display: block; width: 100%; padding: 11px 22px; color: #f1f2f3; background: transparent; font-size: 14px; font-weight: 600; text-align: left; white-space: nowrap; }
+.quality-menu button:hover { background: #ffffff14; }
+.quality-menu button.active { color: #fb7299; background: #ffffff14; }
+.quality-menu button:disabled { color: #8b9099; cursor: default; }
+.watch-detail-card, .watch-comment-panel { background: #232427; border: 0; box-shadow: none; }
+.watch-detail-card h1 { color: #f1f2f3; }
+.watch-up-row { display: flex; align-items: center; gap: 14px; margin: 16px 0 14px; }
+.watch-up-avatar { display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 48px; overflow: hidden; color: #fff; border-radius: 50%; background: linear-gradient(135deg, #fb7299, #ff9d6f); font-weight: 800; }
+.watch-up-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.watch-up-info h2 { margin: 0; color: #f1f2f3; font-size: 17px; }
+.watch-up-info p { margin: 4px 0 0; color: #9499a0; font-size: 12px; }
+.watch-up-row .follow-button { margin-left: auto; height: 36px; padding: 0 24px; color: #fff; background: #3b6df4; border-radius: 8px; font-weight: 700; }
+.watch-up-row .follow-button.followed { color: #c2c5cc; background: #2b2c31; }
+.watch-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid #3a3b41; }
+.watch-bar .watch-meta { margin: 0; color: #9499a0; }
+.watch-actions { position: static; display: flex; gap: 10px; }
+.watch-actions button { min-width: 76px; height: 38px; padding: 0 16px; color: #c2c5cc; background: #2b2c31; border-radius: 8px; }
+.watch-actions .watch-like, .watch-actions button.active { color: #4d9df4; background: #2c3654; }
+.watch-description { max-width: 100%; margin-top: 14px; color: #c2c5cc; }
+.watch-comment-panel .comment-header h2 { color: #f1f2f3; }
+.watch-comment-panel .comment-sort button { color: #9499a0; background: transparent; }
+.watch-comment-panel .comment-sort button.active { color: #4d9df4; }
+.watch-comment-panel .comment-composer textarea { color: #d4d7dd; background: #2b2c31; border-color: #3a3b41; }
+.watch-comment-panel .comment-composer small { color: #6e7278; }
+.watch-comment-panel .comment-composer button { color: #fff; background: #3b6df4; border-radius: 7px; }
+.watch-comment-panel .comment-login { color: #9499a0; background: #2b2c31; }
+.watch-comment-panel .comment-user { color: #d4d7dd; }
+.watch-comment-panel .comment-user small { color: #6e7278; }
+.watch-comment-panel .comment-text { color: #c2c5cc; }
+.watch-comment-panel .comment-actions button { color: #9499a0; }
+.watch-comment-panel .comment-empty { color: #6e7278; }
+.watch-comment-panel .reply-editor textarea { color: #d4d7dd; background: #2b2c31; border-color: #3a3b41; }
+.related-section > h2 { color: #f1f2f3; border-bottom-color: #4d9df4; }
+.related-video h3 { color: #e3e5e7; }
+.related-video p, .related-empty { color: #9499a0; }

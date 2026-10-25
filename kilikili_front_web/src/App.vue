@@ -148,12 +148,133 @@ const uploadSuccessVisible = ref(false);
 const uploadSuccessMessage = ref("");
 const uploadWarningVisible = ref(false);
 const uploadWarningMessage = ref("");
+const qualityLevels = ref<{ index: number; label: string }[]>([]);
+const selectedQuality = ref(-1);
+const qualityMenuOpen = ref(false);
+const theaterMode = ref(false);
+const isPlaying = ref(false);
+const currentTime = ref(0);
+const duration = ref(0);
+const volume = ref(1);
+const muted = ref(false);
+const playbackRate = ref(1);
+const danmakuOn = ref(true);
+const danmakuSettingsOpen = ref(false);
+const rateMenuOpen = ref(false);
+const stageRef = ref<HTMLElement | null>(null);
+
+const progressPercent = computed(() =>
+  duration.value > 0 ? Math.min(100, (currentTime.value / duration.value) * 100) : 0
+);
+
+function togglePlay() {
+  const video = videoPlayer.value;
+  if (!video) return;
+  if (video.paused) void video.play();
+  else video.pause();
+}
+
+function onVideoMeta() {
+  const video = videoPlayer.value;
+  duration.value = video?.duration || 0;
+  currentTime.value = video?.currentTime || 0;
+  video && (video.playbackRate = playbackRate.value);
+  startDanmakuRender();
+}
+
+function onTimeUpdate() {
+  currentTime.value = videoPlayer.value?.currentTime || 0;
+}
+
+function formatClock(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.floor(seconds % 60);
+  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+// 进度条：点击与拖拽定位
+let seeking = false;
+function seekFromPointer(event: PointerEvent) {
+  const video = videoPlayer.value;
+  const bar = event.currentTarget as HTMLElement;
+  if (!video || !duration.value) return;
+  const rect = bar.getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  video.currentTime = ratio * duration.value;
+  currentTime.value = video.currentTime;
+}
+function startSeek(event: PointerEvent) {
+  seeking = true;
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  seekFromPointer(event);
+}
+function moveSeek(event: PointerEvent) {
+  if (seeking) seekFromPointer(event);
+}
+function endSeek() {
+  seeking = false;
+}
+
+function toggleMute() {
+  const video = videoPlayer.value;
+  if (!video) return;
+  video.muted = !video.muted;
+  muted.value = video.muted;
+}
+
+function onVolumeInput(event: Event) {
+  const video = videoPlayer.value;
+  const value = Number((event.target as HTMLInputElement).value);
+  volume.value = value;
+  if (!video) return;
+  video.volume = value;
+  video.muted = value === 0;
+  muted.value = video.muted;
+}
+
+function pickRate(rate: number) {
+  const video = videoPlayer.value;
+  playbackRate.value = rate;
+  if (video) video.playbackRate = rate;
+  rateMenuOpen.value = false;
+}
+
+function toggleFullscreen() {
+  const stage = stageRef.value;
+  if (!stage) return;
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void stage.requestFullscreen?.();
+}
+
+// 按分辨率给出 B 站风格的清晰度名称
+function qualityLabel(height: number) {
+  if (height >= 2160) return "4K 超高清";
+  if (height >= 1080) return "1080P 高清";
+  if (height >= 720) return "720P 准高清";
+  if (height >= 480) return "480P 标清";
+  return "360P 流畅";
+}
+
+// 播放器右下角清晰度角标文案，如 "1080P 高清" / "自动"
+const qualityBadgeText = computed(() => {
+  if (selectedQuality.value === -1) return "自动";
+  const quality = qualityLevels.value.find((item) => item.index === selectedQuality.value);
+  return quality ? quality.label : "自动";
+});
+
+function pickQuality(index: number) {
+  switchQuality(index);
+  qualityMenuOpen.value = false;
+}
 
 function destroyHls() {
   if (hlsInstance) {
     hlsInstance.destroy();
     hlsInstance = null;
   }
+  qualityLevels.value = [];
+  selectedQuality.value = -1;
 }
 
 // HLS 地址交给 hls.js（Safari 走原生支持），普通 MP4 直接设置 src
@@ -169,12 +290,33 @@ function attachVideoSource() {
       hlsInstance = new Hls();
       hlsInstance.loadSource(url);
       hlsInstance.attachMedia(el);
+      hlsInstance.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+        qualityLevels.value = data.levels
+          .map((level, index) => ({ index, height: level.height }))
+          .filter((level) => level.height > 0)
+          .sort((a, b) => b.height - a.height)
+          .map((level) => ({ index: level.index, label: qualityLabel(level.height) }));
+        selectedQuality.value = -1;
+      });
+      // 瞬时故障自愈：后端重启等网络错误自动重试，媒体错误自动恢复
+      hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hlsInstance?.startLoad();
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hlsInstance?.recoverMediaError();
+      });
     } else {
       el.src = url;
     }
   } else {
     el.src = url;
   }
+}
+
+function switchQuality(index: number) {
+  if (!hlsInstance) return;
+  selectedQuality.value = index;
+  // -1 为自动，让 hls.js 按网速自适应；否则锁定指定档位（立即切换）
+  hlsInstance.currentLevel = index;
 }
 
 const navItems: { key: Page; label: string; icon: string }[] = [
@@ -637,6 +779,11 @@ function renderDanmakus() {
   if (!context) return;
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
+  // 弹幕关闭时只清屏，不绘制
+  if (!danmakuOn.value) {
+    danmakuFrame = requestAnimationFrame(renderDanmakus);
+    return;
+  }
   const timeMs = player.currentTime * 1000;
   const fontSize = Math.max(16, Math.min(24, width / 48));
   const lineHeight = fontSize + 10;
@@ -864,6 +1011,13 @@ async function openVideo(video: Video) {
     const response = (await axios.get(`/api/videos/${video.id}`)).data.data;
     selected.value = { ...video, ...response.video };
     playUrl.value = response.playUrl;
+    // 重置播放器状态，避免沿用上一个视频的进度/时长
+    currentTime.value = 0;
+    duration.value = 0;
+    isPlaying.value = false;
+    qualityMenuOpen.value = false;
+    rateMenuOpen.value = false;
+    danmakuSettingsOpen.value = false;
     comments.value = (
       await axios.get(`/api/videos/${video.id}/comments`)
     ).data.data;
@@ -1072,56 +1226,121 @@ onBeforeUnmount(() => {
       </header>
       <main class="content" @scroll="onContentScroll">
         <template v-if="selected">
-          <section class="watch-layout">
+          <section class="watch-layout" :class="{ theater: theaterMode }">
             <div class="watch-main">
               <section class="watch-player-card">
-                <div class="video-stage">
-                  <video ref="videoPlayer" v-if="playUrl" controls autoplay @loadedmetadata="startDanmakuRender" @seeked="startDanmakuRender"></video>
+                <div ref="stageRef" class="video-stage" @dblclick="toggleFullscreen">
+                  <video
+                    ref="videoPlayer"
+                    v-if="playUrl"
+                    autoplay
+                    @loadedmetadata="onVideoMeta"
+                    @timeupdate="onTimeUpdate"
+                    @seeked="startDanmakuRender"
+                    @play="isPlaying = true"
+                    @pause="isPlaying = false"
+                    @volumechange="muted = videoPlayer?.muted ?? false"
+                  ></video>
                   <canvas ref="danmakuCanvas" class="danmaku-canvas"></canvas>
-                </div>
-                <div v-if="loggedIn" class="danmaku-entry">
-                  <input
-                    v-model="danmaku"
-                    maxlength="1000"
-                    placeholder="发一条弹幕吧…"
-                    @keyup.enter="sendDanmaku"
-                  />
-                  <button @click="sendDanmaku">发送</button>
-                </div>
-                <div class="danmaku-tools">
-                  <button :class="{ active: danmakuMode === 'SCROLL' }" @click="danmakuMode = 'SCROLL'">滚动</button><button :class="{ active: danmakuMode === 'TOP' }" @click="danmakuMode = 'TOP'">顶部</button
-                  ><button :class="{ active: danmakuMode === 'BOTTOM' }" @click="danmakuMode = 'BOTTOM'">底部</button
-                  ><label class="danmaku-color" title="自定义颜色"><input v-model="danmakuColor" type="color" aria-label="弹幕颜色"></label>
+                  <div class="player-bar">
+                    <div
+                      class="player-progress"
+                      @pointerdown="startSeek"
+                      @pointermove="moveSeek"
+                      @pointerup="endSeek"
+                      @pointercancel="endSeek"
+                    >
+                      <div class="player-progress-played" :style="{ width: progressPercent + '%' }"></div>
+                    </div>
+                    <div class="player-bar-inner">
+                      <button class="pb-icon" :title="isPlaying ? '暂停' : '播放'" @click="togglePlay">{{ isPlaying ? "❚❚" : "▶" }}</button>
+                      <span class="pb-time">{{ formatClock(currentTime) }} / {{ formatClock(duration) }}</span>
+                      <button class="pb-icon pb-danmaku-toggle" :class="{ off: !danmakuOn }" :title="danmakuOn ? '关闭弹幕' : '开启弹幕'" @click="danmakuOn = !danmakuOn">弹</button>
+                      <div class="pb-menu-wrap">
+                        <button class="pb-icon" title="弹幕设置" @click="danmakuSettingsOpen = !danmakuSettingsOpen">⚙</button>
+                        <div v-if="danmakuSettingsOpen" class="pb-popover">
+                          <div class="pb-danmaku-modes">
+                            <button :class="{ active: danmakuMode === 'SCROLL' }" @click="danmakuMode = 'SCROLL'">滚动</button>
+                            <button :class="{ active: danmakuMode === 'TOP' }" @click="danmakuMode = 'TOP'">顶部</button>
+                            <button :class="{ active: danmakuMode === 'BOTTOM' }" @click="danmakuMode = 'BOTTOM'">底部</button>
+                            <label class="danmaku-color" title="自定义颜色"><input v-model="danmakuColor" type="color" aria-label="弹幕颜色"></label>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="pb-danmaku-input">
+                        <input
+                          v-model="danmaku"
+                          maxlength="1000"
+                          :placeholder="loggedIn ? '发一条弹幕吧…' : '登录后可发送弹幕'"
+                          @focus="loggedIn || openAuth()"
+                          @keyup.enter="sendDanmaku"
+                        />
+                        <button @click="sendDanmaku">发送</button>
+                      </div>
+                      <div class="pb-right">
+                        <div class="pb-menu-wrap">
+                          <button class="pb-text" @click="qualityMenuOpen = !qualityMenuOpen">{{ qualityLevels.length ? qualityBadgeText : "原画" }}</button>
+                          <div v-if="qualityMenuOpen" class="quality-menu pb-menu">
+                            <template v-if="qualityLevels.length">
+                              <button
+                                v-for="quality in qualityLevels"
+                                :key="quality.index"
+                                :class="{ active: selectedQuality === quality.index }"
+                                @click="pickQuality(quality.index)"
+                              >{{ quality.label }}</button
+                              ><button :class="{ active: selectedQuality === -1 }" @click="pickQuality(-1)">自动</button>
+                            </template>
+                            <button v-else disabled>原画（转码完成后可切换）</button>
+                          </div>
+                        </div>
+                        <div class="pb-menu-wrap">
+                          <button class="pb-text" @click="rateMenuOpen = !rateMenuOpen">{{ playbackRate === 1 ? "倍速" : playbackRate + "x" }}</button>
+                          <div v-if="rateMenuOpen" class="pb-menu">
+                            <button v-for="rate in [2, 1.5, 1.25, 1, 0.75, 0.5]" :key="rate" :class="{ active: playbackRate === rate }" @click="pickRate(rate)">{{ rate === 1 ? "1x 正常" : rate + "x" }}</button>
+                          </div>
+                        </div>
+                        <button class="pb-icon" :title="muted ? '取消静音' : '静音'" @click="toggleMute">{{ muted ? "🔇" : "🔊" }}</button>
+                        <input class="pb-volume" type="range" min="0" max="1" step="0.05" :value="muted ? 0 : volume" aria-label="音量" @input="onVolumeInput" />
+                        <button class="pb-icon" :title="theaterMode ? '退出宽屏' : '宽屏模式'" @click="theaterMode = !theaterMode">{{ theaterMode ? "❮" : "❯" }}</button>
+                        <button class="pb-icon" title="全屏" @click="toggleFullscreen">⛶</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </section>
               <section class="watch-detail-card">
                 <h1>{{ selected.title }}</h1>
-                <p class="watch-meta">
-                  ◉ {{ formatCount(selected.viewCount) }} 播放　▣
-                  {{ formatCount(selected.commentCount) }} 弹幕　{{
+                <div class="watch-up-row">
+                  <div class="watch-up-avatar">
+                    <img v-if="selected.authorAvatar" :src="selected.authorAvatar" :alt="selected.authorName" />
+                    <span v-else>{{ selected.authorName.slice(0, 1).toUpperCase() }}</span>
+                  </div>
+                  <div class="watch-up-info">
+                    <h2>{{ selected.authorName }}</h2>
+                    <p>{{ formatCount(selected.likeCount) }} 获赞 · {{ formatCount(selected.viewCount) }} 播放</p>
+                  </div>
+                  <button class="follow-button" :class="{ followed: isFollowingSelected }" @click="toggleAuthorFollow">
+                    {{ isFollowingSelected ? "✓ 已关注" : "+ 关注" }}
+                  </button>
+                </div>
+                <div class="watch-bar">
+                  <p class="watch-meta">
+                    ◉ {{ formatCount(selected.viewCount) }} 播放　▣
+                    {{ formatCount(selected.commentCount) }} 弹幕　{{
                     formatDate(selected.createdAt || "")
                   }}
-                </p>
+                  </p>
+                  <div class="watch-actions">
+                    <button class="watch-like" @click="like">
+                      ♥ {{ selected.likeCount }}
+                    </button>
+                    <button @click="watchAction('投币')">◉ 投币</button>
+                    <button :class="{ active: selectedFavorited }" @click="toggleFavorite">{{ selectedFavorited ? '★ 已收藏' : '☆ 收藏' }}</button>
+                  </div>
+                </div>
                 <p v-if="selected.description" class="watch-description">
                   {{ selected.description }}
                 </p>
-                <div class="watch-actions">
-                  <button class="watch-like" @click="like">
-                    ♥ {{ selected.likeCount }}
-                  </button>
-                  <button @click="watchAction('投币')">◉ 投币</button>
-                  <button :class="{ active: selectedFavorited }" @click="toggleFavorite">{{ selectedFavorited ? '★ 已收藏' : '☆ 收藏' }}</button>
-                </div>
-                <section v-if="false" class="watch-comments">
-                  <h2>评论（{{ comments.length }}）</h2>
-                  <p v-for="item in comments" :key="item.id" class="comment">
-                    <b>{{ item.nickname }}</b
-                    >：{{ item.content }}
-                  </p>
-                  <p v-if="!comments.length" class="no-comments">
-                    暂无评论，来留下第一条评论吧
-                  </p>
-                </section>
               </section>
               <section class="watch-comment-panel">
                 <header class="comment-header">
@@ -1184,22 +1403,6 @@ onBeforeUnmount(() => {
               </section>
             </div>
             <aside class="related-section">
-              <section class="up-info-card">
-                <div class="up-info-head">
-                  <div class="up-avatar">
-                    <img v-if="selected.authorAvatar" :src="selected.authorAvatar" :alt="selected.authorName" />
-                    <span v-else>{{ selected.authorName.slice(0, 1).toUpperCase() }}</span>
-                  </div>
-                  <div class="up-info-name">
-                    <h2>{{ selected.authorName }}</h2>
-                    <p>{{ formatCount(selected.likeCount) }} 获赞 · {{ formatCount(selected.viewCount) }} 播放</p>
-                  </div>
-                  <button class="follow-button" :class="{ followed: isFollowingSelected }" @click="toggleAuthorFollow">
-                    {{ isFollowingSelected ? "✓ 已关注" : "+ 关注" }}
-                  </button>
-                </div>
-                <p class="up-video-summary">发布了这条视频 · {{ formatCount(selected.commentCount) }} 条互动</p>
-              </section>
               <h2>相关推荐</h2>
               <div class="related-list">
                 <article

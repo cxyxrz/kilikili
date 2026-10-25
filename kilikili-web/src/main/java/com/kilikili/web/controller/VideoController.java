@@ -36,7 +36,9 @@ public class VideoController {
     {
         return ApiResponse.ok(videoService.list());
     }
-    @Operation(summary = "获取视频详情和播放地址") @GetMapping("/{id}") public ApiResponse<Map<String, Object>> detail(@PathVariable long id) {
+    @Operation(summary = "获取视频详情和播放地址") @GetMapping("/{id}") public ApiResponse<Map<String, Object>> detail(@PathVariable long id, jakarta.servlet.http.HttpServletResponse response) {
+        // playUrl 含临时签名地址且随转码状态变化，禁止浏览器缓存
+        response.setHeader("Cache-Control", "no-store");
         return ApiResponse.ok(videoService.detail(id));
     }
     @Operation(summary = "获取 HLS 主播放列表", description = "转码完成后返回多清晰度主列表")
