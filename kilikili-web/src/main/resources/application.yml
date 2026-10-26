@@ -21,6 +21,16 @@ kilikili:
     access-key: ${MINIO_ACCESS_KEY:minioadmin}
     secret-key: ${MINIO_SECRET_KEY:minioadmin}
     bucket: ${MINIO_BUCKET:kilikili}
+  ai:
+    enabled: ${AI_REVIEW_ENABLED:true}
+    deepseek-api-key: ${DEEPSEEK_API_KEY:}
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    model: ${DEEPSEEK_MODEL:deepseek-chat}
+    timeout-seconds: ${AI_REVIEW_TIMEOUT_SECONDS:60}
+    batch-size: ${AI_REVIEW_BATCH_SIZE:5}
+    poll-interval-ms: ${AI_REVIEW_POLL_INTERVAL_MS:20000}
+    initial-delay-ms: ${AI_REVIEW_INITIAL_DELAY_MS:10000}
+    auto-publish: ${AI_REVIEW_AUTO_PUBLISH:false}
   transcode:
     enabled: ${TRANSCODE_ENABLED:true}
     executor: ${TRANSCODE_EXECUTOR:docker}

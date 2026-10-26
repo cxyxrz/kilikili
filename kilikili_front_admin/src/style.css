@@ -64,6 +64,12 @@ button { border: 0; cursor: pointer; }
 .status { display: inline-block; padding: 4px 8px; color: #665be8; background: #efedff; border-radius: 4px; font-size: 12px; }
 .status.PUBLISHED, .status.ACTIVE { color: #41a653; background: #edfaee; }
 .status.REJECTED, .status.DISABLED, .status.OFFLINE { color: #e15157; background: #fff0f1; }
+.ai-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; }
+.ai-pass { color: #41a653; background: #edfaee; }
+.ai-review { color: #b17708; background: #fff7e3; }
+.ai-reject { color: #e15157; background: #fff0f1; }
+.ai-error { color: #77808f; background: #f2f4f7; }
+.ai-pending { color: #a1aab8; font-size: 12px; }
 .empty-cell { color: #a1aab8 !important; text-align: center !important; }
 
 .danmaku-page { display: flex; min-height: calc(100vh - 90px); flex-direction: column; }

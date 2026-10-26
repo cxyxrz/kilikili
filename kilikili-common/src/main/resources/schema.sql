@@ -155,6 +155,19 @@ CREATE TABLE IF NOT EXISTS transcode_task (
   INDEX idx_transcode_video (video_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS video_audit (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  video_id BIGINT NOT NULL,
+  auditor_id BIGINT NULL,
+  result VARCHAR(16) NOT NULL,
+  reason VARCHAR(500) NULL,
+  ai_score INT NULL,
+  ai_detail TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_video_audit_video (video_id),
+  INDEX idx_video_audit_result_created (result, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS admin_operation_log (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   operator_id BIGINT NULL,

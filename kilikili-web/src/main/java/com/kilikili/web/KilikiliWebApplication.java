@@ -1,5 +1,6 @@
 package com.kilikili.web;
 
+import com.kilikili.web.ai.AiReviewProperties;
 import com.kilikili.web.transcode.TranscodeProperties;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
@@ -10,7 +11,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication(scanBasePackages = "com.kilikili")
 @MapperScan("com.kilikili")
 @EnableScheduling
-@EnableConfigurationProperties(TranscodeProperties.class)
+@EnableConfigurationProperties({TranscodeProperties.class, AiReviewProperties.class})
 public class KilikiliWebApplication {
     public static void main(String[] args) {
         SpringApplication.run(KilikiliWebApplication.class, args);

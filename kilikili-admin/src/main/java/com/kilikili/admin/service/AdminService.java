@@ -18,6 +18,7 @@ public class AdminService {
     public AdminService(AdminMapper adminMapper) { this.adminMapper = adminMapper; }
     public Map<String, Object> dashboard() { return adminMapper.dashboard(); }
     public List<Map<String, Object>> videos(String status, String keyword, int limit) { return adminMapper.videos(status, keyword, limit); }
+    public List<Map<String, Object>> audits(long videoId) { return adminMapper.audits(videoId); }
     @Transactional
     public void updateVideoStatus(long id, String status) {
         if (!VIDEO_STATUSES.contains(status)) throw new BusinessException("不支持的视频状态");

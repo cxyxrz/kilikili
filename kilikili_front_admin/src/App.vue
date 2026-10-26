@@ -4,7 +4,7 @@ import { computed, ref } from "vue";
 
 type Page = "dashboard" | "audit" | "videos" | "categories" | "danmakus" | "comments" | "users" | "settings" | "logs";
 type UserItem = { id: number; username: string; email: string | null; nickname: string; avatarUrl: string | null; gender: string; status: string; createdAt?: string; lastLoginAt?: string };
-type VideoItem = { id: number; title: string; description: string; status: string; username: string; nickname: string; viewCount: number; likeCount: number; commentCount: number; createdAt?: string };
+type VideoItem = { id: number; title: string; description: string; status: string; username: string; nickname: string; viewCount: number; likeCount: number; commentCount: number; createdAt?: string; aiResult?: string | null; aiScore?: number | null; aiReason?: string | null };
 type DanmakuItem = { id: number; content: string; nickname: string; videoTitle: string; timeMs: number; createdAt: string };
 type CategoryItem = { id: number; name: string; code: string; parentId: number | null; sortOrder: number; childCount: number; videoCount: number };
 type CommentItem = { id: number; parentId: number | null; content: string; username: string; nickname: string; videoTitle: string; replyCount: number; createdAt: string };
@@ -284,6 +284,9 @@ async function setVideoStatus(id: number, status: string) {
     await Promise.all([loadVideos(), dashboard()]);
   } catch (error) { fail(error); }
 }
+function aiResultLabel(result: string) {
+  return { PASS: "通过", REVIEW: "待复核", REJECT: "违规", ERROR: "审核失败" }[result] || result;
+}
 async function deleteDanmaku(item: DanmakuItem) {
   if (!window.confirm(`确定删除弹幕“${item.content}”吗？`)) return;
   try {
@@ -465,9 +468,9 @@ if (ready.value) openPage("settings");
             <select v-model="videoStatus" @change="loadVideos"><option value="">全部状态</option><option value="PENDING_REVIEW">待审核</option><option value="PUBLISHED">已发布</option><option value="REJECTED">已驳回</option><option value="OFFLINE">已下架</option></select>
             <button @click="loadVideos">搜索</button>
           </div>
-          <div class="admin-table-wrap"><table><thead><tr><th>视频名称</th><th>作者</th><th>数据</th><th>状态</th><th>操作</th></tr></thead><tbody>
-            <tr v-for="video in videos" :key="video.id"><td><b>{{ video.title }}</b><small>{{ video.description }}</small></td><td>{{ video.nickname }}<small>@{{ video.username }}</small></td><td>{{ video.viewCount }} 播放 · {{ video.likeCount }} 赞 · {{ video.commentCount }} 评论</td><td><span class="status" :class="video.status">{{ video.status }}</span></td><td class="table-actions"><button v-if="video.status !== 'PUBLISHED'" @click="setVideoStatus(video.id, 'PUBLISHED')">通过</button><button v-if="video.status !== 'REJECTED'" @click="setVideoStatus(video.id, 'REJECTED')">驳回</button><button v-if="video.status !== 'OFFLINE'" class="danger" @click="setVideoStatus(video.id, 'OFFLINE')">下架</button></td></tr>
-            <tr v-if="!videos.length"><td colspan="5" class="empty-cell">没有匹配的视频</td></tr>
+          <div class="admin-table-wrap"><table><thead><tr><th>视频名称</th><th>作者</th><th>数据</th><th>AI 初审</th><th>状态</th><th>操作</th></tr></thead><tbody>
+            <tr v-for="video in videos" :key="video.id"><td><b>{{ video.title }}</b><small>{{ video.description }}</small></td><td>{{ video.nickname }}<small>@{{ video.username }}</small></td><td>{{ video.viewCount }} 播放 · {{ video.likeCount }} 赞 · {{ video.commentCount }} 评论</td><td><span v-if="video.aiResult" class="ai-badge" :class="'ai-' + String(video.aiResult).toLowerCase()" :title="video.aiReason || ''">{{ aiResultLabel(video.aiResult) }}<small v-if="video.aiScore !== null && video.aiScore !== undefined"> {{ video.aiScore }}分</small></span><span v-else class="ai-pending">待初审</span></td><td><span class="status" :class="video.status">{{ video.status }}</span></td><td class="table-actions"><button v-if="video.status !== 'PUBLISHED'" @click="setVideoStatus(video.id, 'PUBLISHED')">通过</button><button v-if="video.status !== 'REJECTED'" @click="setVideoStatus(video.id, 'REJECTED')">驳回</button><button v-if="video.status !== 'OFFLINE'" class="danger" @click="setVideoStatus(video.id, 'OFFLINE')">下架</button></td></tr>
+            <tr v-if="!videos.length"><td colspan="6" class="empty-cell">没有匹配的视频</td></tr>
           </tbody></table></div>
         </section>
 

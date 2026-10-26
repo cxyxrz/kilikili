@@ -29,6 +29,11 @@ public class AdminController {
         require(authorization);
         return ApiResponse.ok(adminService.videos(status, keyword, Math.min(Math.max(limit, 1), 100)));
     }
+    @Operation(summary = "查询视频审核记录（含 AI 初审）") @GetMapping("/videos/{id}/audits")
+    public ApiResponse<List<Map<String, Object>>> videoAudits(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
+        require(authorization);
+        return ApiResponse.ok(adminService.audits(id));
+    }
     @Operation(summary = "更新视频审核状态") @PatchMapping("/videos/{id}/status")
     public ApiResponse<Void> videoStatus(@RequestHeader("Authorization") String authorization, @PathVariable long id, @Valid @RequestBody StatusRequest request) {
         require(authorization); adminService.updateVideoStatus(id, request.status());
