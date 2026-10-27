@@ -2,6 +2,7 @@ package com.kilikili.web.ai;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.kilikili.web.service.RecommendationService;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -23,13 +24,16 @@ public class AiReviewService {
     private final AiReviewProperties properties;
     private final AiReviewMapper aiReviewMapper;
     private final DeepSeekClient deepSeekClient;
+    private final RecommendationService recommendationService;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private boolean missingKeyLogged = false;
 
-    public AiReviewService(AiReviewProperties properties, AiReviewMapper aiReviewMapper, DeepSeekClient deepSeekClient) {
+    public AiReviewService(AiReviewProperties properties, AiReviewMapper aiReviewMapper, DeepSeekClient deepSeekClient,
+                           RecommendationService recommendationService) {
         this.properties = properties;
         this.aiReviewMapper = aiReviewMapper;
         this.deepSeekClient = deepSeekClient;
+        this.recommendationService = recommendationService;
     }
 
     @Scheduled(initialDelayString = "${kilikili.ai.initial-delay-ms:10000}",
@@ -69,6 +73,8 @@ public class AiReviewService {
 
     private boolean decide(long videoId, DeepSeekClient.Verdict verdict) {
         if (!properties.autoPublish() || !PASS.equals(verdict.result())) return false;
-        return aiReviewMapper.updatePendingStatus(videoId, "PUBLISHED") > 0;
+        boolean published = aiReviewMapper.updatePendingStatus(videoId, "PUBLISHED") > 0;
+        if (published) recommendationService.evictRecommendCache();
+        return published;
     }
 }

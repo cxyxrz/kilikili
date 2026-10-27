@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class RecommendationService {
@@ -27,6 +28,18 @@ public class RecommendationService {
         this.recommendationMapper = recommendationMapper; this.storageService = storageService; this.redisTemplate = redisTemplate; this.objectMapper = objectMapper;
     }
     public List<Category> categories() { return recommendationMapper.listCategories(); }
+
+    /**
+     * 清空推荐列表缓存：视频状态变化（审核通过、下线、自动发布）后调用，避免新视频延迟最多 5 分钟才出现。
+     */
+    public void evictRecommendCache() {
+        try {
+            Set<String> keys = redisTemplate.keys("kilikili:recommend:*");
+            if (keys != null && !keys.isEmpty()) redisTemplate.delete(keys);
+        } catch (Exception exception) {
+            log.warn("推荐缓存清理失败", exception);
+        }
+    }
     public Map<String, Object> recommend(Long categoryId, int page, int pageSize) {
         int offset = (page - 1) * pageSize;
         String cacheKey = "kilikili:recommend:" + (categoryId == null ? 0 : categoryId) + ":" + page + ":" + pageSize;

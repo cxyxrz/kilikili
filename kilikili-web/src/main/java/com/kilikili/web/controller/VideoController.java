@@ -5,9 +5,12 @@ import com.kilikili.common.auth.AuthService;
 import com.kilikili.web.dto.CommentRequest;
 import com.kilikili.web.dto.ReplyRequest;
 import com.kilikili.web.dto.DanmakuRequest;
+import com.kilikili.web.dto.ProgressRequest;
 import com.kilikili.web.entity.Danmaku;
 import com.kilikili.web.entity.Video;
 import com.kilikili.web.entity.VideoComment;
+import com.kilikili.web.progress.PlayProgressService;
+import com.kilikili.web.progress.PlayProgressSnapshot;
 import com.kilikili.web.service.VideoService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,7 +34,10 @@ import java.util.Map;
 public class VideoController {
     private final VideoService videoService;
     private final AuthService authService;
-    public VideoController(VideoService videoService, AuthService authService) { this.videoService = videoService; this.authService = authService; }
+    private final PlayProgressService playProgressService;
+    public VideoController(VideoService videoService, AuthService authService, PlayProgressService playProgressService) {
+        this.videoService = videoService; this.authService = authService; this.playProgressService = playProgressService;
+    }
     @Operation(summary = "获取已发布视频列表") @GetMapping public ApiResponse<List<Video>> list()
     {
         return ApiResponse.ok(videoService.list());
@@ -70,6 +76,19 @@ public class VideoController {
     public ApiResponse<Void> recordHistory(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
         videoService.recordHistory(authService.requireUserId(authorization), id);
         return ApiResponse.ok(null);
+    }
+    @Operation(summary = "上报播放进度", description = "写入 Redis 缓存，延迟任务合并后落库")
+    @PostMapping("/{id}/progress")
+    public ApiResponse<Void> reportProgress(@RequestHeader("Authorization") String authorization,
+                                            @PathVariable long id,
+                                            @Valid @RequestBody ProgressRequest request) {
+        playProgressService.report(authService.requireUserId(authorization), id, request.progressSeconds(), request.durationSeconds());
+        return ApiResponse.ok(null);
+    }
+    @Operation(summary = "获取播放进度", description = "优先返回 Redis 中的最新进度，其次回退数据库")
+    @GetMapping("/{id}/progress")
+    public ApiResponse<PlayProgressSnapshot> progress(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
+        return ApiResponse.ok(playProgressService.current(authService.requireUserId(authorization), id));
     }
     @Operation(summary = "获取观看历史") @GetMapping("/history")
     public ApiResponse<Map<String, Object>> history(@RequestHeader("Authorization") String authorization,

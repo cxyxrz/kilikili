@@ -7,6 +7,7 @@ import com.kilikili.web.entity.CreatorVideoSource;
 import com.kilikili.web.entity.HistoryVideoSource;
 import com.kilikili.web.entity.Danmaku;
 import com.kilikili.web.entity.FavoriteVideoSource;
+import com.kilikili.web.entity.RecommendSource;
 import java.util.Map;
 import org.apache.ibatis.annotations.*;
 import java.util.List;
@@ -134,6 +135,16 @@ public interface VideoMapper {
 
     @Select("SELECT COUNT(*) AS videoCount, COALESCE(SUM(view_count),0) AS viewCount, COALESCE(SUM(like_count),0) AS likeCount, COALESCE(SUM(comment_count),0) AS commentCount FROM video WHERE author_id=#{authorId}")
     Map<String, Object> creatorStats(@Param("authorId") long authorId);
+
+    @Select("SELECT COUNT(*) AS videoCount, COALESCE(SUM(like_count),0) AS likeCount FROM video WHERE author_id=#{authorId} AND status='PUBLISHED'")
+    Map<String, Object> spaceStats(@Param("authorId") long authorId);
+
+    @Select("<script>SELECT v.id,v.title,a.nickname AS author_name,v.cover_object_key,v.duration_seconds,v.view_count,v.like_count,v.comment_count,v.category_id FROM video v JOIN account a ON a.id=v.author_id WHERE v.author_id=#{authorId} AND v.status='PUBLISHED' <choose><when test='sort == \"popular\"'>ORDER BY v.view_count DESC, v.id DESC</when><otherwise>ORDER BY v.created_at DESC, v.id DESC</otherwise></choose> LIMIT #{limit} OFFSET #{offset}</script>")
+    List<RecommendSource> listPublishedByAuthor(@Param("authorId") long authorId, @Param("sort") String sort,
+                                                @Param("limit") int limit, @Param("offset") int offset);
+
+    @Select("SELECT COUNT(*) FROM video WHERE author_id=#{authorId} AND status='PUBLISHED'")
+    long countPublishedByAuthor(@Param("authorId") long authorId);
 
     @Insert("INSERT INTO video_view_history(user_id,video_id,watched_at) VALUES(#{userId},#{videoId},CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE watched_at=CURRENT_TIMESTAMP")
     int saveHistory(@Param("userId") long userId, @Param("videoId") long videoId);

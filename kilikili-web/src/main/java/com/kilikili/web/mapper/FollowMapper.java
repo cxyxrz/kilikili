@@ -1,6 +1,7 @@
 package com.kilikili.web.mapper;
 
 import com.kilikili.web.entity.FollowerItem;
+import com.kilikili.web.entity.FollowingUserItem;
 import com.kilikili.web.entity.RecommendSource;
 import org.apache.ibatis.annotations.Arg;
 import org.apache.ibatis.annotations.ConstructorArgs;
@@ -32,6 +33,17 @@ public interface FollowMapper {
 
     @Select("SELECT COUNT(*) FROM user_follow WHERE following_id=#{userId}")
     long countFollowers(@Param("userId") long userId);
+
+    @ConstructorArgs({
+            @Arg(column="id", javaType=Long.class), @Arg(column="nickname", javaType=String.class),
+            @Arg(column="avatar", javaType=String.class), @Arg(column="bio", javaType=String.class),
+            @Arg(column="followed_at", javaType=java.time.LocalDateTime.class)
+    })
+    @Select("SELECT a.id,a.nickname,a.avatar,a.bio,f.created_at AS followed_at FROM user_follow f JOIN account a ON a.id=f.following_id WHERE f.follower_id=#{userId} ORDER BY f.created_at DESC LIMIT #{limit} OFFSET #{offset}")
+    List<FollowingUserItem> listFollowing(@Param("userId") long userId, @Param("limit") int limit, @Param("offset") int offset);
+
+    @Select("SELECT COUNT(*) FROM user_follow WHERE follower_id=#{userId}")
+    long countFollowing(@Param("userId") long userId);
 
     @ConstructorArgs({
             @Arg(column="id", javaType=Long.class), @Arg(column="title", javaType=String.class),

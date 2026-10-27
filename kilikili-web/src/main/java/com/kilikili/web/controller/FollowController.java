@@ -47,6 +47,14 @@ public class FollowController {
         return ApiResponse.ok(followService.followers(authService.requireUserId(authorization), Math.max(1, page), Math.min(Math.max(1, pageSize), 50)));
     }
 
+    @Operation(summary = "获取我关注的 UP 主列表")
+    @GetMapping("/me/following")
+    public ApiResponse<Map<String, Object>> followingUsers(@RequestHeader("Authorization") String authorization,
+                                                          @RequestParam(defaultValue = "1") int page,
+                                                          @RequestParam(defaultValue = "50") int pageSize) {
+        return ApiResponse.ok(followService.followingUsers(authService.requireUserId(authorization), Math.max(1, page), Math.min(Math.max(1, pageSize), 50)));
+    }
+
     @Operation(summary = "获取我关注 UP 主发布的视频")
     @GetMapping("/me/following/videos")
     public ApiResponse<Map<String, Object>> followingVideos(@RequestHeader("Authorization") String authorization,

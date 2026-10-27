@@ -130,6 +130,24 @@ button { border: 0; cursor: pointer; }
 .category-dialog footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
 .cancel-button { min-width: 76px; height: 38px; color: #697487; background: #fff; border: 1px solid #dce2e9; border-radius: 5px; }
 
+.audit-dialog { display: flex; width: 720px; max-height: 78vh; flex-direction: column; padding: 0 24px 22px; background: #fff; border-radius: 9px; box-shadow: 0 22px 60px #12142655; }
+.audit-dialog > header { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #edf0f4; }
+.audit-dialog h2 { margin: 0; color: #263044; font-size: 19px; }
+.audit-dialog header p { max-width: 560px; overflow: hidden; margin: 6px 0 0; color: #9aa3b1; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.audit-dialog header button { padding: 8px; color: #9ba4b2; background: transparent; font-size: 25px; }
+.audit-list { overflow-y: auto; padding-top: 16px; }
+.audit-list .empty-cell { padding: 40px 0; }
+.audit-item { padding: 14px 16px; background: #fafbfc; border: 1px solid #edf0f4; border-radius: 7px; }
+.audit-item + .audit-item { margin-top: 12px; }
+.audit-item-head { display: flex; align-items: center; gap: 10px; color: #3b4659; }
+.audit-item-head b { font-size: 14px; }
+.audit-item-head small { color: #8f99a8; }
+.audit-item-head time { margin-left: auto; color: #a1aab8; font-size: 12px; }
+.audit-item > p { margin: 10px 0 0; color: #667183; font-size: 13px; line-height: 1.6; }
+.audit-opinion { margin-top: 10px; padding: 10px 12px; background: #f2f4f7; border-radius: 5px; }
+.audit-opinion > span { color: #8f99a8; font-size: 12px; }
+.audit-opinion > p { margin: 5px 0 0; color: #5d6879; font-size: 13px; line-height: 1.6; }
+
 .comment-page { display: flex; min-height: calc(100vh - 90px); flex-direction: column; }
 .comment-filter { display: flex; min-height: 70px; align-items: center; gap: 10px; padding: 15px 16px; background: #fff; border-bottom: 1px solid #e9edf3; }
 .comment-filter input, .comment-filter select { height: 38px; padding: 0 11px; color: #687386; background: #fff; border: 1px solid #dfe4ec; border-radius: 5px; outline-color: #409eff; }

@@ -36,6 +36,13 @@ kilikili:
     poll-interval-ms: ${AI_REVIEW_POLL_INTERVAL_MS:20000}
     initial-delay-ms: ${AI_REVIEW_INITIAL_DELAY_MS:10000}
     auto-publish: ${AI_REVIEW_AUTO_PUBLISH:false}
+  progress:
+    enabled: ${PLAY_PROGRESS_ENABLED:true}
+    delay-ms: ${PLAY_PROGRESS_DELAY_MS:20000}
+    flush-interval-ms: ${PLAY_PROGRESS_FLUSH_INTERVAL_MS:20000}
+    initial-delay-ms: ${PLAY_PROGRESS_INITIAL_DELAY_MS:5000}
+    cache-ttl-seconds: ${PLAY_PROGRESS_CACHE_TTL_SECONDS:86400}
+    batch-size: ${PLAY_PROGRESS_BATCH_SIZE:200}
   transcode:
     enabled: ${TRANSCODE_ENABLED:true}
     executor: ${TRANSCODE_EXECUTOR:docker}

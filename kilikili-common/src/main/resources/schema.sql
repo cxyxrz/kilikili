@@ -114,6 +114,15 @@ CREATE TABLE IF NOT EXISTS video_view_history (
   INDEX idx_history_user_watched (user_id, watched_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS video_play_progress (
+  user_id BIGINT NOT NULL,
+  video_id BIGINT NOT NULL,
+  progress_seconds INT NOT NULL DEFAULT 0,
+  duration_seconds INT NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, video_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS video_danmaku (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   video_id BIGINT NOT NULL,
@@ -137,6 +146,17 @@ CREATE TABLE IF NOT EXISTS user_notification (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_notification_recipient_created (recipient_id, created_at),
   INDEX idx_notification_recipient_type (recipient_id, type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS private_message (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  from_id BIGINT NOT NULL,
+  to_id BIGINT NOT NULL,
+  content VARCHAR(500) NOT NULL,
+  read_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_message_to_read (to_id, read_at),
+  INDEX idx_message_thread (from_id, to_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS transcode_task (

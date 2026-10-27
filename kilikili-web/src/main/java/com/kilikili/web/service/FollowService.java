@@ -4,6 +4,7 @@ import com.kilikili.common.exception.BusinessException;
 import com.kilikili.common.storage.StorageService;
 import com.kilikili.common.setting.SystemSettingService;
 import com.kilikili.web.entity.FollowerItem;
+import com.kilikili.web.entity.FollowingUserItem;
 import com.kilikili.web.entity.RecommendItem;
 import com.kilikili.web.mapper.AccountMapper;
 import com.kilikili.web.mapper.FollowMapper;
@@ -54,6 +55,17 @@ public class FollowService {
                         ? null : storageService.presignedReadUrl(item.avatar()), item.followedAt()))
                 .toList();
         long total = followMapper.countFollowers(userId);
+        return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total,
+                "hasMore", (long) page * pageSize < total);
+    }
+
+    public Map<String, Object> followingUsers(long userId, int page, int pageSize) {
+        int offset = (page - 1) * pageSize;
+        List<FollowingUserItem> items = followMapper.listFollowing(userId, pageSize, offset).stream()
+                .map(item -> new FollowingUserItem(item.id(), item.nickname(), item.avatar() == null || item.avatar().isBlank()
+                        ? null : storageService.presignedReadUrl(item.avatar()), item.bio(), item.followedAt()))
+                .toList();
+        long total = followMapper.countFollowing(userId);
         return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total,
                 "hasMore", (long) page * pageSize < total);
     }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import Hls from "hls.js";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 
 type User = { id: number; username: string; nickname: string };
 type Video = {
@@ -34,7 +34,42 @@ type NotificationItem = {
   actorName: string;
   actorAvatar?: string | null;
 };
+type FollowingUser = {
+  id: number;
+  nickname: string;
+  avatar?: string | null;
+  bio?: string | null;
+  followedAt: string;
+};
 type Category = { id: number; name: string };
+type SpaceUser = {
+  id: number;
+  nickname: string;
+  avatar?: string | null;
+  bio?: string | null;
+  followerCount: number;
+  followingCount: number;
+  likeCount: number;
+  videoCount: number;
+  isSelf: boolean;
+  following: boolean;
+};
+type Conversation = {
+  peerId: number;
+  peerName: string;
+  peerAvatar?: string | null;
+  lastContent: string;
+  lastAt: string;
+  unread: number;
+};
+type PrivateMessage = {
+  id: number;
+  fromId: number;
+  toId: number;
+  content: string;
+  readAt?: string | null;
+  createdAt: string;
+};
 type CreatorVideo = {
   id: number;
   title: string;
@@ -61,8 +96,10 @@ type Page =
   | "history"
   | "favorite"
   | "message"
+  | "chat"
   | "following"
   | "fans"
+  | "space"
   | "settings";
 
 const token = ref(localStorage.getItem("kilikili_token") || "");
@@ -94,12 +131,30 @@ const selectedFavorited = ref(false);
 const selectedFollowing = ref(false);
 const fans = ref<Follower[]>([]);
 const fansLoading = ref(false);
-const followingVideos = ref<Video[]>([]);
+const followingUsers = ref<FollowingUser[]>([]);
+const followingTotal = ref(0);
 const followingLoading = ref(false);
+// UP 主主页
+const spaceUserId = ref<number | null>(null);
+const spaceUser = ref<SpaceUser | null>(null);
+const spaceVideos = ref<Video[]>([]);
+const spaceLoading = ref(false);
+const spaceSort = ref<"latest" | "popular">("latest");
+const spaceFollowBusy = ref(false);
 const notifications = ref<NotificationItem[]>([]);
 const notificationLoading = ref(false);
 const notificationTab = ref<"ALL" | NotificationItem["type"]>("ALL");
 const unreadNotificationCount = ref(0);
+const conversations = ref<Conversation[]>([]);
+const conversationLoading = ref(false);
+const activePeerId = ref<number | null>(null);
+const chatPeer = ref<{ id: number; nickname: string; avatar?: string | null } | null>(null);
+const chatMessages = ref<PrivateMessage[]>([]);
+const chatLoading = ref(false);
+const chatInput = ref("");
+const sendingMessage = ref(false);
+const unreadMessageCount = ref(0);
+const chatBody = ref<HTMLElement | null>(null);
 const selected = ref<Video | null>(null);
 const playUrl = ref("");
 const comments = ref<Comment[]>([]);
@@ -109,6 +164,13 @@ const notice = ref("");
 const authVisible = ref(false);
 const authMode = ref<"login" | "register">("login");
 const auth = ref({ username: "", password: "", nickname: "" });
+// 装饰性二维码图案（扫码登录尚未接入，仅用于界面展示）
+const qrCells = Array.from({ length: 441 }, (_, index) => {
+  const row = Math.floor(index / 21);
+  const col = index % 21;
+  const inFinder = (row < 7 && col < 7) || (row < 7 && col > 13) || (row > 13 && col < 7);
+  return !inFinder && (index * 7 + row * 3) % 5 < 2;
+});
 const upload = ref({
   title: "",
   description: "",
@@ -142,7 +204,11 @@ const videoPlayer = ref<HTMLVideoElement | null>(null);
 const danmakuCanvas = ref<HTMLCanvasElement | null>(null);
 let danmakuFrame = 0;
 let searchTimer = 0;
-let notificationPoll = 0;
+// WebSocket 实时通知：连接句柄、重连定时器、心跳定时器
+let realtimeSocket: WebSocket | null = null;
+let realtimeReconnectTimer = 0;
+let realtimeHeartbeatTimer = 0;
+let realtimeRetry = 0;
 let hlsInstance: Hls | null = null;
 const uploadSuccessVisible = ref(false);
 const uploadSuccessMessage = ref("");
@@ -157,6 +223,8 @@ const qualityMenuOpen = ref(false);
 const theaterMode = ref(false);
 const isPlaying = ref(false);
 const currentTime = ref(0);
+// 打开视频时从后端取到的续播进度（秒），元数据加载完成后跳转
+let resumeSeconds = 0;
 const duration = ref(0);
 const volume = ref(1);
 const muted = ref(false);
@@ -177,16 +245,47 @@ function togglePlay() {
   else video.pause();
 }
 
+// 点击画面任意位置切换播放/暂停；控制栏上的点击不触发
+function onStageClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null;
+  if (target?.closest(".player-bar")) return;
+  togglePlay();
+}
+
 function onVideoMeta() {
   const video = videoPlayer.value;
   duration.value = video?.duration || 0;
   currentTime.value = video?.currentTime || 0;
+  // 续播：进度接近结尾时不跳转，避免一打开就播完
+  if (video && resumeSeconds > 0 && resumeSeconds < duration.value - 3) {
+    video.currentTime = resumeSeconds;
+    currentTime.value = resumeSeconds;
+  }
+  resumeSeconds = 0;
   video && (video.playbackRate = playbackRate.value);
   startDanmakuRender();
 }
 
 function onTimeUpdate() {
   currentTime.value = videoPlayer.value?.currentTime || 0;
+}
+
+// 播放进度：每 15 秒上报一次，后端先写 Redis，再由延迟任务合并落库
+let progressPoll = 0;
+function reportPlayProgress() {
+  const player = videoPlayer.value;
+  if (!loggedIn.value || !selected.value || !player || player.paused) return;
+  if (!Number.isFinite(player.duration) || player.duration <= 0) return;
+  void axios
+    .post(
+      `/api/videos/${selected.value.id}/progress`,
+      {
+        progressSeconds: Math.round(player.currentTime),
+        durationSeconds: Math.round(player.duration),
+      },
+      { headers: authHeaders() },
+    )
+    .catch(() => undefined);
 }
 
 function formatClock(seconds: number) {
@@ -345,6 +444,7 @@ const navItems: { key: Page; label: string; icon: string }[] = [
   { key: "history", label: "历史记录", icon: "◷" },
   { key: "favorite", label: "我的收藏", icon: "☆" },
   { key: "message", label: "消息通知", icon: "✉" },
+  { key: "chat", label: "私信", icon: "✎" },
   { key: "following", label: "我的关注", icon: "♙" },
   { key: "fans", label: "我的粉丝", icon: "●" },
   { key: "settings", label: "账号设置", icon: "⚙" },
@@ -356,11 +456,16 @@ const pageTitle: Record<Page, string> = {
   history: "观看历史",
   favorite: "我的收藏",
   message: "消息通知",
+  chat: "私信",
   following: "我的关注",
   fans: "粉丝列表",
+  space: "个人主页",
   settings: "账号设置",
 };
 const loggedIn = computed(() => Boolean(token.value));
+const activeConversation = computed(() =>
+  conversations.value.find((item) => item.peerId === activePeerId.value) || null,
+);
 const displayedVideos = computed(() => activePage.value === "search" ? searchResults.value : videos.value);
 const relatedVideos = computed(() =>
   videos.value.filter((video) => video.id !== selected.value?.id).slice(0, 8),
@@ -464,10 +569,27 @@ async function toggleAuthorFollow() {
   try {
     const data = (await axios.post(`/api/users/${selected.value.authorId}/follow`, {}, { headers: authHeaders() })).data.data;
     selectedFollowing.value = data.following;
-    if (activePage.value === "following") loadFollowingVideos();
+    if (activePage.value === "following") loadFollowingUsers();
     notice.value = data.following ? "已关注 UP 主" : "已取消关注";
   } catch (error) {
     fail(error);
+  }
+}
+// 关注列表中本页取关/回关的本地状态：取关后保留卡片，方便再次关注
+const unfollowedAuthorIds = reactive(new Set<number>());
+const followingToggleIds = reactive(new Set<number>());
+async function toggleFollowingUser(author: FollowingUser) {
+  if (followingToggleIds.has(author.id)) return;
+  followingToggleIds.add(author.id);
+  try {
+    const data = (await axios.post(`/api/users/${author.id}/follow`, {}, { headers: authHeaders() })).data.data;
+    if (data.following) unfollowedAuthorIds.delete(author.id);
+    else unfollowedAuthorIds.add(author.id);
+    notice.value = data.following ? `已关注 ${author.nickname}` : `已取消关注 ${author.nickname}`;
+  } catch (error) {
+    fail(error);
+  } finally {
+    followingToggleIds.delete(author.id);
   }
 }
 function formatDate(value: string) {
@@ -501,10 +623,12 @@ async function submitAuth() {
       if (activePage.value === "history") loadHistory();
       if (activePage.value === "favorite") loadFavorites();
       if (activePage.value === "message") loadNotifications();
+      if (activePage.value === "chat") loadConversations();
       loadUnreadNotificationCount();
-      if (!notificationPoll) notificationPoll = window.setInterval(loadUnreadNotificationCount, 30000);
+      loadUnreadMessageCount();
+      connectRealtime();
       if (activePage.value === "fans") loadFans();
-      if (activePage.value === "following") loadFollowingVideos();
+      if (activePage.value === "following") loadFollowingUsers();
     } else {
       await axios.post("/api/auth/register", auth.value);
       notice.value = "注册成功，请登录";
@@ -520,11 +644,16 @@ function logout() {
   historyVideos.value = [];
   favoriteVideos.value = [];
   fans.value = [];
-  followingVideos.value = [];
+  followingUsers.value = [];
+  followingTotal.value = 0;
   notifications.value = [];
   unreadNotificationCount.value = 0;
-  window.clearInterval(notificationPoll);
-  notificationPoll = 0;
+  conversations.value = [];
+  activePeerId.value = null;
+  chatPeer.value = null;
+  chatMessages.value = [];
+  unreadMessageCount.value = 0;
+  disconnectRealtime();
   localStorage.removeItem("kilikili_token");
   localStorage.removeItem("kilikili_user");
   notice.value = "已退出登录";
@@ -670,6 +799,161 @@ async function loadUnreadNotificationCount() {
     // The notification badge should not interrupt normal page use when the server is unavailable.
   }
 }
+async function loadUnreadMessageCount() {
+  if (!loggedIn.value) {
+    unreadMessageCount.value = 0;
+    return;
+  }
+  try {
+    unreadMessageCount.value = (await axios.get("/api/messages/unread-count", {
+      headers: authHeaders(),
+    })).data.data.count;
+  } catch {
+    // 私信红点失败不影响主流程
+  }
+}
+async function loadConversations() {
+  if (!loggedIn.value) {
+    conversations.value = [];
+    return;
+  }
+  conversationLoading.value = true;
+  try {
+    conversations.value = (await axios.get("/api/messages/conversations", {
+      headers: authHeaders(),
+    })).data.data.items;
+    if (activePeerId.value && !conversations.value.some((item) => item.peerId === activePeerId.value)) {
+      activePeerId.value = null;
+      chatPeer.value = null;
+      chatMessages.value = [];
+    }
+  } catch (error) {
+    fail(error);
+  } finally {
+    conversationLoading.value = false;
+  }
+}
+async function loadChatThread(peerId: number) {
+  if (!loggedIn.value) return;
+  chatLoading.value = true;
+  try {
+    const data = (await axios.get(`/api/messages/${peerId}`, {
+      headers: authHeaders(),
+      params: { page: 1, pageSize: 50 },
+    })).data.data;
+    chatMessages.value = data.items;
+    chatPeer.value = data.peer;
+    await nextTick();
+    if (chatBody.value) chatBody.value.scrollTop = chatBody.value.scrollHeight;
+  } catch (error) {
+    fail(error);
+  } finally {
+    chatLoading.value = false;
+  }
+}
+async function openConversation(peerId: number) {
+  activePeerId.value = peerId;
+  await loadChatThread(peerId);
+  await markConversationRead(peerId);
+}
+async function markConversationRead(peerId: number) {
+  try {
+    unreadMessageCount.value = (
+      await axios.post(`/api/messages/${peerId}/read`, {}, { headers: authHeaders() })
+    ).data.data.unread;
+    const target = conversations.value.find((item) => item.peerId === peerId);
+    if (target) target.unread = 0;
+  } catch {
+    // 标记已读失败时保持原红点，等待下次拉取
+  }
+}
+async function sendPrivateMessage() {
+  if (!activePeerId.value || !chatInput.value.trim() || sendingMessage.value) return;
+  const peerId = activePeerId.value;
+  sendingMessage.value = true;
+  try {
+    await axios.post("/api/messages", { toId: peerId, content: chatInput.value.trim() }, { headers: authHeaders() });
+    chatInput.value = "";
+    await loadChatThread(peerId);
+    await loadConversations();
+  } catch (error) {
+    fail(error);
+  } finally {
+    sendingMessage.value = false;
+  }
+}
+function realtimeUrl() {
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.host}/ws/notifications?token=${encodeURIComponent(token.value)}`;
+}
+function connectRealtime() {
+  if (!loggedIn.value || realtimeSocket) return;
+  const socket = new WebSocket(realtimeUrl());
+  realtimeSocket = socket;
+  socket.onopen = () => {
+    realtimeRetry = 0;
+    window.clearInterval(realtimeHeartbeatTimer);
+    // 心跳：及时感知断线，触发自动重连
+    realtimeHeartbeatTimer = window.setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) socket.send("ping");
+    }, 25000);
+  };
+  socket.onmessage = (event) => {
+    if (event.data === "pong") return;
+    try {
+      handleRealtimeEvent(JSON.parse(event.data));
+    } catch {
+      // 忽略无法解析的推送内容
+    }
+  };
+  socket.onclose = () => {
+    window.clearInterval(realtimeHeartbeatTimer);
+    realtimeHeartbeatTimer = 0;
+    if (realtimeSocket === socket) realtimeSocket = null;
+    scheduleRealtimeReconnect();
+  };
+  socket.onerror = () => socket.close();
+}
+function scheduleRealtimeReconnect() {
+  if (!loggedIn.value || realtimeReconnectTimer) return;
+  const delay = Math.min(30000, 1000 * 2 ** realtimeRetry);
+  realtimeRetry = Math.min(realtimeRetry + 1, 5);
+  realtimeReconnectTimer = window.setTimeout(() => {
+    realtimeReconnectTimer = 0;
+    connectRealtime();
+  }, delay);
+}
+function disconnectRealtime() {
+  window.clearTimeout(realtimeReconnectTimer);
+  realtimeReconnectTimer = 0;
+  window.clearInterval(realtimeHeartbeatTimer);
+  realtimeHeartbeatTimer = 0;
+  realtimeRetry = 0;
+  if (realtimeSocket) {
+    const socket = realtimeSocket;
+    realtimeSocket = null;
+    socket.close();
+  }
+}
+function handleRealtimeEvent(event: any) {
+  if (event.kind === "NOTIFICATION") {
+    unreadNotificationCount.value =
+      typeof event.unread === "number" ? event.unread : unreadNotificationCount.value + 1;
+    if (activePage.value === "message") loadNotifications();
+    return;
+  }
+  if (event.kind === "MESSAGE") {
+    unreadMessageCount.value =
+      typeof event.unread === "number" ? event.unread : unreadMessageCount.value + 1;
+    if (activePage.value === "chat") {
+      loadConversations();
+      if (activePeerId.value === event.fromId) {
+        loadChatThread(event.fromId);
+        markConversationRead(event.fromId);
+      }
+    }
+  }
+}
 async function loadFans() {
   if (!loggedIn.value) {
     fans.value = [];
@@ -687,22 +971,79 @@ async function loadFans() {
     fansLoading.value = false;
   }
 }
-async function loadFollowingVideos() {
+async function loadFollowingUsers() {
   if (!loggedIn.value) {
-    followingVideos.value = [];
+    followingUsers.value = [];
+    followingTotal.value = 0;
     return;
   }
   followingLoading.value = true;
   try {
-    followingVideos.value = (await axios.get("/api/users/me/following/videos", {
+    const data = (await axios.get("/api/users/me/following", {
       headers: authHeaders(),
       params: { page: 1, pageSize: 50 },
-    })).data.data.items;
+    })).data.data;
+    followingUsers.value = data.items;
+    followingTotal.value = data.total;
+    // 重新拉取后以服务端状态为准，清空本地取关标记
+    unfollowedAuthorIds.clear();
   } catch (error) {
     fail(error);
   } finally {
     followingLoading.value = false;
   }
+}
+async function openSpace(userId: number) {
+  activePage.value = "space";
+  selected.value = null;
+  spaceUserId.value = userId;
+  spaceSort.value = "latest";
+  await loadSpace();
+}
+async function loadSpace() {
+  if (!spaceUserId.value) return;
+  spaceLoading.value = true;
+  try {
+    const data = (await axios.get(`/api/users/${spaceUserId.value}/space`, {
+      headers: authHeaders(),
+      params: { sort: spaceSort.value, page: 1, pageSize: 12 },
+    })).data.data;
+    spaceUser.value = data.user;
+    spaceVideos.value = data.videos;
+  } catch (error) {
+    fail(error);
+  } finally {
+    spaceLoading.value = false;
+  }
+}
+async function switchSpaceSort(sort: "latest" | "popular") {
+  if (spaceSort.value === sort) return;
+  spaceSort.value = sort;
+  await loadSpace();
+}
+async function toggleSpaceFollow() {
+  if (!spaceUser.value || spaceUser.value.isSelf || spaceFollowBusy.value) return;
+  if (!loggedIn.value) {
+    openAuth();
+    return;
+  }
+  spaceFollowBusy.value = true;
+  try {
+    const data = (await axios.post(`/api/users/${spaceUser.value.id}/follow`, {}, { headers: authHeaders() })).data.data;
+    spaceUser.value.following = data.following;
+    spaceUser.value.followerCount += data.following ? 1 : -1;
+    notice.value = data.following ? "已关注 UP 主" : "已取消关注";
+  } catch (error) {
+    fail(error);
+  } finally {
+    spaceFollowBusy.value = false;
+  }
+}
+async function openChatWith(peerId: number) {
+  activePage.value = "chat";
+  selected.value = null;
+  await loadConversations();
+  await openConversation(peerId);
 }
 function selectNotificationTab(tab: "ALL" | NotificationItem["type"]) {
   if (notificationTab.value === tab) return;
@@ -901,7 +1242,7 @@ function navigate(page: Page) {
   activePage.value = page;
   selected.value = null;
   if (
-    (page === "create" || page === "settings" || page === "history" || page === "favorite" || page === "message" || page === "fans" || page === "following") &&
+    (page === "create" || page === "settings" || page === "history" || page === "favorite" || page === "message" || page === "chat" || page === "fans" || page === "following") &&
     !loggedIn.value
   )
     openAuth();
@@ -910,8 +1251,12 @@ function navigate(page: Page) {
   if (page === "favorite" && loggedIn.value) loadFavorites();
   if (page === "message" && loggedIn.value) loadNotifications();
   if (page === "message" && loggedIn.value) loadUnreadNotificationCount();
+  if (page === "chat" && loggedIn.value) {
+    loadConversations();
+    loadUnreadMessageCount();
+  }
   if (page === "fans" && loggedIn.value) loadFans();
-  if (page === "following" && loggedIn.value) loadFollowingVideos();
+  if (page === "following" && loggedIn.value) loadFollowingUsers();
   if (page === "recommend") loadVideos();
   if (page === "search") loadSearchResults();
   if (page === "create" && loggedIn.value) {
@@ -1041,6 +1386,12 @@ async function openVideo(video: Video) {
     serverHeights.value = response.playUrl?.includes(".m3u8") ? renditionHeights(response.transcode?.renditions ?? []) : [];
     qualityLevels.value = serverHeights.value.map((height) => ({ height, label: qualityLabel(height) }));
     selectedQuality.value = null;
+    // 登录用户上次的播放进度，播放器元数据就绪后自动续播
+    resumeSeconds = 0;
+    if (loggedIn.value) {
+      const progress = (await axios.get(`/api/videos/${video.id}/progress`, { headers: authHeaders() })).data.data;
+      resumeSeconds = Number(progress?.progressSeconds ?? 0);
+    }
     comments.value = (
       await axios.get(`/api/videos/${video.id}/comments`)
     ).data.data;
@@ -1122,16 +1473,19 @@ async function sendReply() {
 onMounted(() => {
   loadCategories();
   loadVideos();
+  progressPoll = window.setInterval(reportPlayProgress, 15000);
   if (loggedIn.value) {
     loadProfile();
     loadUnreadNotificationCount();
-    notificationPoll = window.setInterval(loadUnreadNotificationCount, 30000);
+    loadUnreadMessageCount();
+    connectRealtime();
   }
 });
 onBeforeUnmount(() => {
   stopDanmakuRender();
   destroyHls();
-  window.clearInterval(notificationPoll);
+  disconnectRealtime();
+  window.clearInterval(progressPoll);
 });
 </script>
 
@@ -1194,6 +1548,8 @@ onBeforeUnmount(() => {
           </span>
           <span v-else class="nav-icon">{{ item.icon }}</span>
           <span class="nav-label">{{ item.label }}</span>
+          <i v-if="item.key === 'message' && unreadNotificationCount > 0" class="nav-badge">{{ unreadNotificationCount > 99 ? "99+" : unreadNotificationCount }}</i>
+          <i v-else-if="item.key === 'chat' && unreadMessageCount > 0" class="nav-badge">{{ unreadMessageCount > 99 ? "99+" : unreadMessageCount }}</i>
         </button>
       </nav>
       <div class="account-area">
@@ -1252,7 +1608,7 @@ onBeforeUnmount(() => {
           <section class="watch-layout" :class="{ theater: theaterMode }">
             <div class="watch-main">
               <section class="watch-player-card">
-                <div ref="stageRef" class="video-stage" @dblclick="toggleFullscreen">
+                <div ref="stageRef" class="video-stage" @click="onStageClick" @dblclick="toggleFullscreen">
                   <video
                     ref="videoPlayer"
                     v-if="playUrl"
@@ -1334,12 +1690,12 @@ onBeforeUnmount(() => {
               <section class="watch-detail-card">
                 <h1>{{ selected.title }}</h1>
                 <div class="watch-up-row">
-                  <div class="watch-up-avatar">
+                  <div class="watch-up-avatar" title="查看个人主页" @click="selected.authorId && openSpace(selected.authorId)">
                     <img v-if="selected.authorAvatar" :src="selected.authorAvatar" :alt="selected.authorName" />
                     <span v-else>{{ selected.authorName.slice(0, 1).toUpperCase() }}</span>
                   </div>
                   <div class="watch-up-info">
-                    <h2>{{ selected.authorName }}</h2>
+                    <h2 class="clickable-name" @click="selected.authorId && openSpace(selected.authorId)">{{ selected.authorName }}</h2>
                     <p>{{ formatCount(selected.likeCount) }} 获赞 · {{ formatCount(selected.viewCount) }} 播放</p>
                   </div>
                   <button class="follow-button" :class="{ followed: isFollowingSelected }" @click="toggleAuthorFollow">
@@ -1900,6 +2256,68 @@ onBeforeUnmount(() => {
               <span>✉</span><p>暂时没有消息通知</p>
             </div>
           </section>
+          <section v-else-if="activePage === 'chat' && loggedIn" class="chat-page">
+            <header class="notification-header">
+              <h1>私信</h1>
+              <span class="chat-unread">未读 {{ unreadMessageCount }}</span>
+            </header>
+            <div class="chat-layout">
+              <aside class="conversation-list">
+                <p v-if="conversationLoading" class="load-status">正在加载会话…</p>
+                <template v-else-if="conversations.length">
+                  <button
+                    v-for="item in conversations"
+                    :key="item.peerId"
+                    class="conversation-item"
+                    :class="{ active: item.peerId === activePeerId }"
+                    @click="openConversation(item.peerId)"
+                  >
+                    <span class="avatar small">
+                      <img v-if="item.peerAvatar" :src="item.peerAvatar" :alt="item.peerName" />
+                      <template v-else>{{ item.peerName.slice(0, 1).toUpperCase() }}</template>
+                    </span>
+                    <span class="conversation-main">
+                      <b>{{ item.peerName }}</b>
+                      <small>{{ item.lastContent }}</small>
+                    </span>
+                    <i v-if="item.unread > 0" class="conversation-badge">{{ item.unread > 99 ? "99+" : item.unread }}</i>
+                  </button>
+                </template>
+                <div v-else class="notification-empty">
+                  <span>✎</span><p>还没有私信会话</p>
+                </div>
+              </aside>
+              <div v-if="activePeerId" class="chat-panel">
+                <header class="chat-panel-header">
+                  <span class="avatar small">
+                    <img v-if="chatPeer?.avatar || activeConversation?.peerAvatar" :src="chatPeer?.avatar || activeConversation?.peerAvatar || ''" :alt="chatPeer?.nickname" />
+                    <template v-else>{{ (chatPeer?.nickname || activeConversation?.peerName || "友").slice(0, 1).toUpperCase() }}</template>
+                  </span>
+                  <b>{{ chatPeer?.nickname || activeConversation?.peerName || "私信" }}</b>
+                </header>
+                <div ref="chatBody" class="chat-body">
+                  <p v-if="chatLoading" class="load-status">正在加载私信…</p>
+                  <template v-else-if="chatMessages.length">
+                    <div
+                      v-for="item in chatMessages"
+                      :key="item.id"
+                      class="chat-bubble-row"
+                      :class="{ mine: item.fromId === user?.id }"
+                    >
+                      <div class="chat-bubble">{{ item.content }}</div>
+                      <small>{{ formatHistoryTime(item.createdAt) }}</small>
+                    </div>
+                  </template>
+                  <div v-else class="chat-empty">和 TA 打个招呼吧</div>
+                </div>
+                <form class="chat-composer" @submit.prevent="sendPrivateMessage">
+                  <input v-model="chatInput" maxlength="500" placeholder="输入私信内容..." />
+                  <button type="submit" :disabled="sendingMessage || !chatInput.trim()">发送</button>
+                </form>
+              </div>
+              <div v-else class="chat-placeholder">选择左侧会话开始聊天</div>
+            </div>
+          </section>
           <section
             v-else-if="activePage === 'history' && loggedIn"
             class="history-page"
@@ -1961,26 +2379,93 @@ onBeforeUnmount(() => {
             <div v-else class="favorite-empty"><span>☆</span><p>还没有收藏视频</p><button @click="navigate('recommend')">去发现喜欢的视频</button></div>
           </section>
           <section v-else-if="activePage === 'following' && loggedIn" class="following-page">
-            <p v-if="followingLoading" class="load-status">正在加载关注动态…</p>
-            <section v-else-if="followingVideos.length" class="video-grid following-grid">
-              <article v-for="video in followingVideos" :key="video.id" class="video-card" @click="openVideo(video)">
-                <div class="video-cover"><img v-if="video.coverUrl" :src="video.coverUrl" :alt="video.title"><span v-else>▶</span><em>{{ formatDuration(video.durationSeconds) }}</em></div>
-                <h3>{{ video.title }}</h3>
-                <p><span class="mini-avatar">{{ video.authorName.slice(0, 1) }}</span>{{ video.authorName }}</p>
-                <small>◉ {{ formatCount(video.viewCount) }}　▣ {{ formatCount(video.commentCount) }}</small>
+            <header class="following-toolbar">
+              <span class="following-group"><i class="following-caret">▾</i>默认分组<span class="following-count">{{ followingTotal - unfollowedAuthorIds.size }}</span></span>
+              <span class="following-sort"><i>≡</i>最常访问</span>
+            </header>
+            <p v-if="followingLoading" class="load-status">正在加载关注列表…</p>
+            <div v-else-if="followingUsers.length" class="following-grid">
+              <article v-for="author in followingUsers" :key="author.id" class="following-card">
+                <button class="following-avatar" title="查看个人主页" @click="openSpace(author.id)">
+                  <img v-if="author.avatar" :src="author.avatar" :alt="author.nickname" />
+                  <span v-else>{{ author.nickname.slice(0, 1).toUpperCase() }}</span>
+                  <i class="following-mark">⚡</i>
+                </button>
+                <div class="following-info">
+                  <b class="clickable-name" @click="openSpace(author.id)">{{ author.nickname }}</b>
+                  <p>{{ author.bio || "这个人很神秘，还没有填写简介" }}</p>
+                  <button
+                    class="following-pill"
+                    :class="{ unfollowed: unfollowedAuthorIds.has(author.id) }"
+                    :disabled="followingToggleIds.has(author.id)"
+                    @click="toggleFollowingUser(author)"
+                  >
+                    <i>≡</i>{{ unfollowedAuthorIds.has(author.id) ? "关注" : "已关注" }}
+                  </button>
+                </div>
               </article>
-            </section>
-            <div v-else class="following-empty"><span>◎</span><p>关注的 UP 主还没有发布视频</p><button @click="navigate('recommend')">去发现更多 UP 主</button></div>
+            </div>
+            <div v-else class="following-empty"><span>◎</span><p>还没有关注任何 UP 主</p><button @click="navigate('recommend')">去发现更多 UP 主</button></div>
+          </section>
+          <section v-else-if="activePage === 'space'" class="space-page">
+            <p v-if="spaceLoading && !spaceUser" class="load-status">正在加载主页…</p>
+            <template v-else-if="spaceUser">
+              <div class="space-banner"><span class="space-banner-mark">K</span></div>
+              <div class="space-header">
+                <div class="space-avatar">
+                  <img v-if="spaceUser.avatar" :src="spaceUser.avatar" :alt="spaceUser.nickname" />
+                  <span v-else>{{ spaceUser.nickname.slice(0, 1).toUpperCase() }}</span>
+                  <i class="following-mark">⚡</i>
+                </div>
+                <div class="space-identity">
+                  <h1>{{ spaceUser.nickname }}<em v-if="spaceUser.isSelf">我自己</em></h1>
+                  <p>{{ spaceUser.bio || "这个人很神秘，还没有填写简介" }}</p>
+                </div>
+                <div class="space-stats">
+                  <div><b>{{ formatCount(spaceUser.followingCount) }}</b><span>关注数</span></div>
+                  <div><b>{{ formatCount(spaceUser.followerCount) }}</b><span>粉丝数</span></div>
+                  <div><b>{{ formatCount(spaceUser.likeCount) }}</b><span>获赞数</span></div>
+                </div>
+                <div v-if="!spaceUser.isSelf" class="space-actions">
+                  <button class="space-follow" :class="{ followed: spaceUser.following }" :disabled="spaceFollowBusy" @click="toggleSpaceFollow">
+                    <i>≡</i>{{ spaceUser.following ? "已关注" : "关注" }}
+                  </button>
+                  <button class="space-message" @click="openChatWith(spaceUser.id)">发消息</button>
+                </div>
+                <div v-else class="space-actions">
+                  <button class="space-message" @click="navigate('settings')">编辑资料</button>
+                </div>
+              </div>
+              <div class="space-content">
+                <nav class="space-tabs">
+                  <button :class="{ active: spaceSort === 'latest' }" @click="switchSpaceSort('latest')">最新发布</button>
+                  <button :class="{ active: spaceSort === 'popular' }" @click="switchSpaceSort('popular')">最多播放</button>
+                  <button v-if="spaceVideos.length" class="space-play-all" @click="openVideo(spaceVideos[0])">▶ 播放全部</button>
+                </nav>
+                <p v-if="spaceLoading" class="load-status">正在加载投稿…</p>
+                <div v-else-if="spaceVideos.length" class="video-grid space-grid">
+                  <article v-for="video in spaceVideos" :key="video.id" class="video-card" @click="openVideo(video)">
+                    <div class="video-cover">
+                      <img v-if="video.coverUrl" :src="video.coverUrl" :alt="video.title" /><span v-else>▶</span><em>{{ formatDuration(video.durationSeconds) }}</em>
+                    </div>
+                    <h3>{{ video.title }}</h3>
+                    <p><span class="mini-avatar">{{ video.authorName.slice(0, 1) }}</span>{{ video.authorName }}</p>
+                    <small>◉ {{ formatCount(video.viewCount) }}　▣ {{ formatCount(video.commentCount) }}</small>
+                  </article>
+                </div>
+                <p v-else class="empty">这位 UP 主还没有发布视频</p>
+              </div>
+            </template>
           </section>
           <section v-else-if="activePage === 'fans' && loggedIn" class="fans-page">
             <p v-if="fansLoading" class="load-status">正在加载粉丝列表…</p>
             <div v-else-if="fans.length" class="fan-grid">
               <article v-for="fan in fans" :key="fan.id" class="fan-card fan-member">
-                <div class="fan-avatar">
+                <button class="fan-avatar" title="查看个人主页" @click="openSpace(fan.id)">
                   <img v-if="fan.avatar" :src="fan.avatar" :alt="fan.nickname" />
                   <span v-else>{{ fan.nickname.slice(0, 1).toUpperCase() }}</span>
-                </div>
-                <b>{{ fan.nickname }}</b>
+                </button>
+                <b class="clickable-name" @click="openSpace(fan.id)">{{ fan.nickname }}</b>
                 <small>关注于 {{ formatHistoryTime(fan.followedAt) }}</small>
               </article>
             </div>
@@ -2076,31 +2561,53 @@ onBeforeUnmount(() => {
     </section>
     <div
       v-if="authVisible"
-      class="modal-mask"
+      class="modal-mask login-mask"
       @click.self="authVisible = false"
     >
-      <section class="auth-modal">
-        <button class="close" @click="authVisible = false">×</button>
-        <div class="modal-brand">
-          <span class="brand-mark">K</span><b>Kilikili</b>
+      <section class="login-window">
+        <div class="login-traffic"><i></i><i></i><i></i></div>
+        <button class="login-close" @click="authVisible = false">×</button>
+        <div class="login-left">
+          <h2>扫描二维码登录</h2>
+          <div class="login-qr">
+            <div class="login-qr-grid">
+              <i v-for="(cell, index) in qrCells" :key="index" :class="{ on: cell }"></i>
+            </div>
+            <span class="qr-finder top-left"></span>
+            <span class="qr-finder top-right"></span>
+            <span class="qr-finder bottom-left"></span>
+            <span class="login-qr-mask">扫码登录敬请期待</span>
+          </div>
+          <p class="login-qr-tip">
+            请使用 <b>Kilikili 客户端</b><br />扫码登录或扫码下载 APP
+          </p>
         </div>
-        <h2>{{ authMode === "login" ? "欢迎回来" : "创建账号" }}</h2>
-        <input v-model="auth.username" placeholder="用户名" /><input
-          v-model="auth.password"
-          type="password"
-          placeholder="密码"
-        /><input
-          v-if="authMode === 'register'"
-          v-model="auth.nickname"
-          placeholder="昵称"
-        /><button class="primary" @click="submitAuth">
-          {{ authMode === "login" ? "登录" : "注册" }}
-        </button>
-        <p>
-          <a @click="authMode = authMode === 'login' ? 'register' : 'login'">{{
-            authMode === "login" ? "没有账号？去注册" : "已有账号？去登录"
-          }}</a>
-        </p>
+        <div class="login-right">
+          <nav class="login-tabs">
+            <button :class="{ active: authMode === 'login' }" @click="authMode = 'login'">密码登录</button>
+            <span>|</span>
+            <button :class="{ active: authMode === 'register' }" @click="authMode = 'register'">注册账号</button>
+          </nav>
+          <div class="login-form">
+            <label class="login-field">
+              <i class="login-prefix">账号</i>
+              <input v-model="auth.username" placeholder="请输入用户名" />
+            </label>
+            <label class="login-field">
+              <i class="login-prefix">密码</i>
+              <input v-model="auth.password" type="password" placeholder="请输入密码" @keyup.enter="submitAuth" />
+            </label>
+            <label v-if="authMode === 'register'" class="login-field">
+              <i class="login-prefix">昵称</i>
+              <input v-model="auth.nickname" placeholder="请输入昵称" @keyup.enter="submitAuth" />
+            </label>
+          </div>
+          <button class="login-submit" @click="submitAuth">{{ authMode === "login" ? "登录" : "注册" }}</button>
+          <p class="login-note">
+            未注册过的账号，可在上方「注册账号」中创建<br />
+            登录或完成注册即代表你同意 <a>用户协议</a> 和 <a>隐私政策</a>
+          </p>
+        </div>
       </section>
     </div>
 

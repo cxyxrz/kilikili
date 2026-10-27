@@ -6,6 +6,7 @@ type Page = "dashboard" | "audit" | "videos" | "categories" | "danmakus" | "comm
 type UserItem = { id: number; username: string; email: string | null; nickname: string; avatarUrl: string | null; gender: string; status: string; createdAt?: string; lastLoginAt?: string };
 type VideoItem = { id: number; title: string; description: string; status: string; username: string; nickname: string; viewCount: number; likeCount: number; commentCount: number; createdAt?: string; aiResult?: string | null; aiScore?: number | null; aiReason?: string | null };
 type DanmakuItem = { id: number; content: string; nickname: string; videoTitle: string; timeMs: number; createdAt: string };
+type AuditItem = { id: number; videoId: number; auditorId: number | null; result: string; reason: string; aiScore: number | null; aiDetail: string | null; createdAt: string };
 type CategoryItem = { id: number; name: string; code: string; parentId: number | null; sortOrder: number; childCount: number; videoCount: number };
 type CommentItem = { id: number; parentId: number | null; content: string; username: string; nickname: string; videoTitle: string; replyCount: number; createdAt: string };
 type OperationLogItem = { id: number; operatorId: number | null; operatorName: string; module: string; action: string; description: string; ipAddress: string; status: string; errorMessage: string | null; durationMs: number; createdAt: string };
@@ -43,6 +44,10 @@ const settingOptions: { key: keyof SystemSettings; label: string }[] = [
 ];
 const selectedCategoryId = ref<number | null>(null);
 const expandedCategoryId = ref<number | null>(null);
+const auditDialog = ref(false);
+const auditVideo = ref<VideoItem | null>(null);
+const audits = ref<AuditItem[]>([]);
+const auditLoading = ref(false);
 const categoryDialog = ref(false);
 const editingCategoryId = ref<number | null>(null);
 const categoryForm = ref({ name: "", code: "", parentId: null as number | null, sortOrder: 0 });
@@ -284,8 +289,31 @@ async function setVideoStatus(id: number, status: string) {
     await Promise.all([loadVideos(), dashboard()]);
   } catch (error) { fail(error); }
 }
+async function openAudits(video: VideoItem) {
+  auditVideo.value = video;
+  audits.value = [];
+  auditDialog.value = true;
+  auditLoading.value = true;
+  try {
+    audits.value = (await axios.get(`/api/admin/videos/${video.id}/audits`, { headers: headers() })).data.data;
+  } catch (error) {
+    fail(error);
+    auditDialog.value = false;
+  } finally {
+    auditLoading.value = false;
+  }
+}
 function aiResultLabel(result: string) {
   return { PASS: "通过", REVIEW: "待复核", REJECT: "违规", ERROR: "审核失败" }[result] || result;
+}
+function aiOpinion(detail: string | null) {
+  if (!detail) return "";
+  try {
+    const parsed = JSON.parse(detail);
+    return typeof parsed?.reason === "string" ? parsed.reason : detail;
+  } catch {
+    return detail;
+  }
 }
 async function deleteDanmaku(item: DanmakuItem) {
   if (!window.confirm(`确定删除弹幕“${item.content}”吗？`)) return;
@@ -469,7 +497,7 @@ if (ready.value) openPage("settings");
             <button @click="loadVideos">搜索</button>
           </div>
           <div class="admin-table-wrap"><table><thead><tr><th>视频名称</th><th>作者</th><th>数据</th><th>AI 初审</th><th>状态</th><th>操作</th></tr></thead><tbody>
-            <tr v-for="video in videos" :key="video.id"><td><b>{{ video.title }}</b><small>{{ video.description }}</small></td><td>{{ video.nickname }}<small>@{{ video.username }}</small></td><td>{{ video.viewCount }} 播放 · {{ video.likeCount }} 赞 · {{ video.commentCount }} 评论</td><td><span v-if="video.aiResult" class="ai-badge" :class="'ai-' + String(video.aiResult).toLowerCase()" :title="video.aiReason || ''">{{ aiResultLabel(video.aiResult) }}<small v-if="video.aiScore !== null && video.aiScore !== undefined"> {{ video.aiScore }}分</small></span><span v-else class="ai-pending">待初审</span></td><td><span class="status" :class="video.status">{{ video.status }}</span></td><td class="table-actions"><button v-if="video.status !== 'PUBLISHED'" @click="setVideoStatus(video.id, 'PUBLISHED')">通过</button><button v-if="video.status !== 'REJECTED'" @click="setVideoStatus(video.id, 'REJECTED')">驳回</button><button v-if="video.status !== 'OFFLINE'" class="danger" @click="setVideoStatus(video.id, 'OFFLINE')">下架</button></td></tr>
+            <tr v-for="video in videos" :key="video.id"><td><b>{{ video.title }}</b><small>{{ video.description }}</small></td><td>{{ video.nickname }}<small>@{{ video.username }}</small></td><td>{{ video.viewCount }} 播放 · {{ video.likeCount }} 赞 · {{ video.commentCount }} 评论</td><td><span v-if="video.aiResult" class="ai-badge" :class="'ai-' + String(video.aiResult).toLowerCase()" :title="video.aiReason || ''">{{ aiResultLabel(video.aiResult) }}<small v-if="video.aiScore !== null && video.aiScore !== undefined"> {{ video.aiScore }}分</small></span><span v-else class="ai-pending">待初审</span></td><td><span class="status" :class="video.status">{{ video.status }}</span></td><td class="table-actions"><button @click="openAudits(video)">审核记录</button><button v-if="video.status !== 'PUBLISHED'" @click="setVideoStatus(video.id, 'PUBLISHED')">通过</button><button v-if="video.status !== 'REJECTED'" @click="setVideoStatus(video.id, 'REJECTED')">驳回</button><button v-if="video.status !== 'OFFLINE'" class="danger" @click="setVideoStatus(video.id, 'OFFLINE')">下架</button></td></tr>
             <tr v-if="!videos.length"><td colspan="6" class="empty-cell">没有匹配的视频</td></tr>
           </tbody></table></div>
         </section>
@@ -601,5 +629,27 @@ if (ready.value) openPage("settings");
       <label><span>排序</span><input v-model.number="categoryForm.sortOrder" type="number" min="0" max="9999" required /></label>
       <footer><button type="button" class="cancel-button" @click="categoryDialog = false">取消</button><button type="submit" class="primary-button">保存</button></footer>
     </form>
+  </div>
+
+  <div v-if="auditDialog" class="dialog-mask" @click.self="auditDialog = false">
+    <section class="audit-dialog">
+      <header>
+        <div><h2>审核记录</h2><p>{{ auditVideo?.title }}</p></div>
+        <button @click="auditDialog = false">×</button>
+      </header>
+      <div class="audit-list">
+        <article v-for="item in audits" :key="item.id" class="audit-item">
+          <div class="audit-item-head">
+            <span class="ai-badge" :class="'ai-' + item.result.toLowerCase()">{{ aiResultLabel(item.result) }}</span>
+            <b>{{ item.auditorId == null ? 'AI 初审' : '人工审核' }}</b>
+            <small v-if="item.aiScore !== null && item.aiScore !== undefined">评分 {{ item.aiScore }}</small>
+            <time>{{ formatDate(item.createdAt) }}</time>
+          </div>
+          <p>{{ item.reason || '无说明' }}</p>
+          <div v-if="item.aiDetail" class="audit-opinion"><span>AI 意见</span><p>{{ aiOpinion(item.aiDetail) }}</p></div>
+        </article>
+        <p v-if="!audits.length" class="empty-cell">{{ auditLoading ? '加载中...' : '该视频暂无审核记录' }}</p>
+      </div>
+    </section>
   </div>
 </template>

@@ -3,6 +3,7 @@ package com.kilikili.web.service;
 import com.kilikili.common.storage.StorageService;
 import com.kilikili.web.entity.NotificationItem;
 import com.kilikili.web.mapper.NotificationMapper;
+import com.kilikili.web.realtime.RealtimePushService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,16 +14,22 @@ import java.util.Map;
 public class NotificationService {
     private final NotificationMapper notificationMapper;
     private final StorageService storageService;
+    private final RealtimePushService realtimePushService;
 
-    public NotificationService(NotificationMapper notificationMapper, StorageService storageService) {
+    public NotificationService(NotificationMapper notificationMapper, StorageService storageService, RealtimePushService realtimePushService) {
         this.notificationMapper = notificationMapper;
         this.storageService = storageService;
+        this.realtimePushService = realtimePushService;
     }
 
     @Transactional
     public void create(long recipientId, long actorId, String type, String content, Long videoId) {
         if (recipientId == actorId) return;
-        notificationMapper.insert(recipientId, actorId, type, content.length() > 500 ? content.substring(0, 500) : content, videoId);
+        String trimmed = content.length() > 500 ? content.substring(0, 500) : content;
+        notificationMapper.insert(recipientId, actorId, type, trimmed, videoId);
+        long unread = notificationMapper.countUnread(recipientId);
+        realtimePushService.pushAfterCommit(recipientId,
+                Map.of("kind", "NOTIFICATION", "type", type, "content", trimmed, "unread", unread));
     }
 
     public Map<String, Object> list(long userId, String type, int page, int pageSize) {

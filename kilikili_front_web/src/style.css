@@ -295,3 +295,161 @@
 .related-section > h2 { color: #f1f2f3; border-bottom-color: #4d9df4; }
 .related-video h3 { color: #e3e5e7; }
 .related-video p, .related-empty { color: #9499a0; }
+/* 私信页面 */
+.nav-badge { margin-left: auto; min-width: 19px; height: 19px; padding: 0 6px; color: #fff; background: #fd5262; border-radius: 10px; font-size: 12px; font-style: normal; line-height: 19px; text-align: center; }
+.compact .nav-badge { display: none; }
+.chat-page { width: min(100%, 1624px); }
+.chat-unread { color: #8791a1; font-size: 14px; }
+.chat-layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); height: min(720px, calc(100vh - 190px)); min-height: 480px; margin-right: 16px; overflow: hidden; background: #fff; border: 1px solid #e9eaf0; border-radius: 10px; }
+.conversation-list { overflow-y: auto; border-right: 1px solid #edf0f5; }
+.conversation-item { display: flex; align-items: center; gap: 11px; width: 100%; padding: 13px 16px; background: transparent; text-align: left; border-bottom: 1px solid #f2f4f8; }
+.conversation-item:hover { background: #f7f8fc; }
+.conversation-item.active { background: #f0eeff; }
+.conversation-main { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.conversation-main b { color: #1c2940; font-size: 15px; }
+.conversation-main small { overflow: hidden; color: #98a2b3; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-badge { min-width: 18px; padding: 0 5px; color: #fff; background: #fd5262; border-radius: 9px; font-size: 11px; font-style: normal; line-height: 18px; text-align: center; }
+.conversation-item .avatar img, .chat-panel-header .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.chat-panel { display: flex; min-width: 0; flex-direction: column; }
+.chat-panel-header { display: flex; align-items: center; flex: 0 0 58px; height: 58px; padding: 0 18px; gap: 10px; border-bottom: 1px solid #edf0f5; }
+.chat-panel-header b { color: #1c2940; font-size: 16px; }
+.chat-body { flex: 1; overflow-y: auto; padding: 18px; }
+.chat-bubble-row { display: flex; align-items: flex-end; margin-bottom: 12px; gap: 8px; }
+.chat-bubble-row small { color: #9ba7b7; font-size: 11px; }
+.chat-bubble { max-width: 62%; padding: 9px 13px; color: #1f2937; background: #f2f4f8; border-radius: 4px 12px 12px 12px; font-size: 14px; line-height: 1.5; word-break: break-word; }
+.chat-bubble-row.mine { flex-direction: row-reverse; }
+.chat-bubble-row.mine .chat-bubble { color: #fff; background: #6d60ff; border-radius: 12px 4px 12px 12px; }
+.chat-empty, .chat-placeholder { display: grid; flex: 1; place-items: center; color: #9ba7b7; }
+.chat-placeholder { background: #fff; }
+.chat-composer { display: flex; padding: 12px 16px; gap: 10px; border-top: 1px solid #edf0f5; }
+.chat-composer input { flex: 1; height: 40px; padding: 0 12px; color: #485365; background: #fff; border: 1px solid #dde1e9; border-radius: 7px; outline-color: #7468fa; }
+.chat-composer button { min-width: 76px; color: #fff; background: #6d60ff; border-radius: 7px; font-weight: 700; }
+.chat-composer button:disabled { opacity: .5; cursor: not-allowed; }
+.dark .chat-layout, .dark .chat-placeholder { background: #20232f; border-color: #303545; }
+.dark .conversation-list { border-color: #343b49; }
+.dark .conversation-item { border-color: #2b303d; }
+.dark .conversation-item:hover { background: #262b39; }
+.dark .conversation-item.active { background: #3c3872; }
+.dark .conversation-main b, .dark .chat-panel-header b { color: #edf2fb; }
+.dark .chat-panel-header, .dark .chat-composer { border-color: #343b49; }
+.dark .chat-bubble { color: #e8edf5; background: #2b303d; }
+.dark .chat-bubble-row.mine .chat-bubble { color: #fff; background: #6d60ff; }
+.dark .chat-composer input { color: #e8edf5; background: #272b39; border-color: #3c4354; }
+/* 我的关注：UP 主列表 */
+.following-page { width: min(100%, 1500px); }
+.following-toolbar { display: flex; align-items: center; justify-content: space-between; margin: 0 0 22px; }
+.following-group { display: inline-flex; align-items: center; gap: 10px; color: #18191c; font-size: 16px; font-weight: 700; }
+.following-caret { color: #9499a0; font-size: 14px; font-style: normal; }
+.following-count { color: #9499a0; font-size: 13px; font-weight: 500; }
+.following-sort { display: inline-flex; align-items: center; gap: 7px; color: #61666d; font-size: 14px; }
+.following-sort i { color: #9499a0; font-size: 14px; font-style: normal; }
+.following-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 60px; row-gap: 22px; padding-right: 30px; }
+.following-card { display: flex; align-items: flex-start; gap: 16px; min-width: 0; }
+.following-avatar { position: relative; display: grid; width: 78px; height: 78px; flex: 0 0 78px; place-items: center; color: #fff; background: linear-gradient(135deg, #a8b0df, #e1e3f0); border-radius: 50%; font-size: 26px; font-weight: 800; }
+.following-avatar img { width: 78px; height: 78px; object-fit: cover; border-radius: 50%; }
+.following-mark { position: absolute; right: 0; bottom: 2px; display: grid; width: 20px; height: 20px; padding: 0; place-items: center; color: #fff; background: #ffb400; border: 2px solid #f6f7fa; border-radius: 50%; font-size: 10px; font-style: normal; }
+.following-info { min-width: 0; padding-top: 3px; }
+.following-info b { display: block; overflow: hidden; color: #fb7299; font-size: 17px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.following-info p { overflow: hidden; max-width: 480px; margin: 9px 0 12px; color: #9499a0; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.following-pill { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 15px; color: #61666d; background: #f1f2f3; border: 1px solid transparent; border-radius: 6px; font-size: 14px; cursor: pointer; }
+.following-pill:hover { background: #e7e8ea; }
+.following-pill.unfollowed { color: #fb7299; background: #fff; border-color: #fb7299; }
+.following-pill.unfollowed:hover { background: #fff5f8; }
+.following-pill:disabled { opacity: .6; cursor: wait; }
+.following-pill i { color: #9499a0; font-size: 13px; font-style: normal; }
+.following-pill.unfollowed i { color: #fb7299; }
+.dark .following-group { color: #edf2fb; }
+.dark .following-sort, .dark .following-pill { color: #c4cad6; }
+.dark .following-pill { background: #2b303d; }
+.dark .following-pill.unfollowed { color: #fb7299; background: #272b39; border-color: #fb7299; }
+.dark .following-mark { border-color: #181b25; }
+@media (max-width: 1100px) { .following-grid { grid-template-columns: minmax(0, 1fr); padding-right: 0; } }
+.clickable-name { cursor: pointer; }
+.clickable-name:hover { color: #fb7299; }
+button.following-avatar, button.fan-avatar { padding: 0; border: 0; cursor: pointer; font-family: inherit; }
+button.following-avatar:hover img, button.following-avatar:hover > span:first-child { opacity: .85; }
+/* UP 主个人主页 */
+.space-page { width: min(100%, 1500px); }
+.space-banner { position: relative; height: 180px; overflow: hidden; background: radial-gradient(circle at 18% 30%, rgba(255, 214, 229, .95), transparent 42%), radial-gradient(circle at 78% 20%, rgba(168, 190, 255, .9), transparent 45%), linear-gradient(115deg, #2f3a55, #6d60ff 48%, #fb7299); border-radius: 10px; }
+.space-banner::after { position: absolute; right: 6%; bottom: -70px; width: 220px; height: 220px; background: rgba(255, 255, 255, .12); border-radius: 50%; content: ""; }
+.space-banner-mark { position: absolute; right: 16%; top: 42px; color: rgba(255, 255, 255, .28); font-size: 92px; font-weight: 800; letter-spacing: -4px; }
+.space-header { position: relative; display: flex; align-items: flex-end; flex-wrap: wrap; margin-top: -46px; padding: 0 24px 18px; gap: 20px; }
+.space-avatar { position: relative; display: grid; width: 112px; height: 112px; flex: 0 0 112px; place-items: center; color: #fff; background: linear-gradient(135deg, #a8b0df, #e1e3f0); border: 4px solid #fff; border-radius: 50%; font-size: 38px; font-weight: 800; }
+.space-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.space-avatar .following-mark { right: 4px; bottom: 6px; width: 24px; height: 24px; font-size: 12px; }
+.space-identity { flex: 1; min-width: 220px; padding-bottom: 6px; }
+.space-identity h1 { display: flex; align-items: center; margin: 0; color: #18191c; font-size: 24px; font-weight: 700; gap: 8px; }
+.space-identity h1 em { padding: 2px 8px; color: #fb7299; background: #fff0f5; border-radius: 4px; font-size: 12px; font-style: normal; font-weight: 600; }
+.space-identity p { margin: 8px 0 0; color: #9499a0; font-size: 13px; line-height: 1.6; }
+.space-stats { display: flex; padding-bottom: 6px; gap: 34px; }
+.space-stats div { display: grid; gap: 6px; text-align: center; }
+.space-stats b { color: #18191c; font-size: 19px; font-weight: 600; }
+.space-stats span { color: #9499a0; font-size: 12px; }
+.space-actions { display: flex; align-self: center; padding-bottom: 6px; gap: 10px; }
+.space-follow, .space-message { display: inline-flex; align-items: center; height: 34px; padding: 0 20px; border-radius: 6px; font-size: 14px; cursor: pointer; gap: 6px; }
+.space-follow { color: #fff; background: #fb7299; border: 1px solid #fb7299; }
+.space-follow i { font-style: normal; }
+.space-follow.followed { color: #61666d; background: #f1f2f3; border-color: #f1f2f3; }
+.space-follow:disabled { opacity: .65; cursor: wait; }
+.space-message { color: #fb7299; background: #fff; border: 1px solid #fb7299; }
+.space-message:hover { background: #fff5f8; }
+.space-content { padding: 6px 24px 40px; }
+.space-tabs { display: flex; align-items: center; margin-bottom: 18px; border-bottom: 1px solid #e9eaf0; gap: 30px; }
+.space-tabs > button { position: relative; height: 44px; padding: 0; color: #61666d; background: transparent; font-size: 15px; cursor: pointer; }
+.space-tabs > button.active { color: #18191c; font-weight: 700; }
+.space-tabs > button.active::after { position: absolute; left: 0; bottom: -1px; width: 100%; height: 2px; background: #fb7299; content: ""; }
+.space-tabs .space-play-all { margin-left: auto; height: 32px; padding: 0 16px; color: #fff; background: #fb7299; border-radius: 6px; font-size: 13px; font-weight: 600; }
+.space-play-all::after { display: none; }
+.space-grid { padding-right: 0; }
+.dark .space-identity h1, .dark .space-stats b { color: #edf2fb; }
+.dark .space-identity h1 em { background: #3a2733; }
+.dark .space-avatar { border-color: #181b25; }
+.dark .space-follow.followed { color: #c4cad6; background: #2b303d; border-color: #2b303d; }
+.dark .space-message { background: #20232f; }
+.dark .space-tabs { border-color: #343b49; }
+.dark .space-tabs > button { color: #aab2c0; }
+.dark .space-tabs > button.active { color: #edf2fb; }
+
+/* 登录窗口：左二维码 + 右表单 */
+.login-mask { background: #1b1f2a66; }
+.login-window { position: relative; display: flex; width: min(92vw, 880px); min-height: 520px; padding: 34px 34px 0; background: #fff; border-radius: 12px; box-shadow: 0 24px 70px #10152c3d; }
+.login-traffic { position: absolute; top: 15px; left: 18px; display: flex; gap: 8px; }
+.login-traffic i { width: 11px; height: 11px; background: #ff5f57; border-radius: 50%; }
+.login-traffic i:nth-child(2) { background: #ffbd2e; }
+.login-traffic i:nth-child(3) { background: #28c840; }
+.login-close { position: absolute; top: 10px; right: 14px; z-index: 2; padding: 0 4px; color: #929cab; background: transparent; border: 0; font-size: 22px; cursor: pointer; }
+.login-left { display: flex; flex-direction: column; align-items: center; width: 300px; flex: 0 0 300px; padding: 30px 40px 0 0; border-right: 1px solid #e3e5e7; }
+.login-left h2 { margin: 0 0 26px; color: #18191c; font-size: 19px; font-weight: 500; }
+.login-qr { position: relative; width: 170px; height: 170px; padding: 10px; background: #fff; border: 1px solid #e3e5e7; border-radius: 4px; }
+.login-qr-grid { display: grid; grid-template-columns: repeat(21, 1fr); grid-template-rows: repeat(21, 1fr); width: 100%; height: 100%; }
+.login-qr-grid i { background: transparent; }
+.login-qr-grid i.on { background: #18191c; }
+.qr-finder { position: absolute; width: 50px; height: 50px; background: #18191c; box-shadow: inset 0 0 0 6px #fff, inset 0 0 0 12px #18191c; }
+.qr-finder.top-left { top: 10px; left: 10px; }
+.qr-finder.top-right { top: 10px; right: 10px; }
+.qr-finder.bottom-left { bottom: 10px; left: 10px; }
+.login-qr-mask { position: absolute; inset: 0; display: grid; place-items: center; color: #61666d; background: #ffffffeb; font-size: 13px; }
+.login-qr-tip { margin: 20px 0 0; color: #18191c; font-size: 13px; line-height: 22px; text-align: center; }
+.login-qr-tip b { color: #fb7299; font-weight: 500; }
+.login-right { display: flex; flex: 1; flex-direction: column; min-width: 0; padding: 30px 0 0 44px; }
+.login-tabs { display: flex; align-items: center; justify-content: center; margin-bottom: 30px; gap: 22px; }
+.login-tabs button { padding: 0 0 6px; color: #18191c; background: transparent; border: 0; border-bottom: 2px solid transparent; font-size: 17px; cursor: pointer; }
+.login-tabs button.active { color: #fb7299; border-bottom-color: #fb7299; font-weight: 600; }
+.login-tabs span { color: #e3e5e7; }
+.login-form { overflow: hidden; border: 1px solid #e3e5e7; border-radius: 8px; }
+.login-field { display: flex; align-items: center; height: 56px; padding: 0 16px; gap: 12px; }
+.login-field + .login-field { border-top: 1px solid #e3e5e7; }
+.login-prefix { width: 46px; flex: 0 0 46px; color: #18191c; font-size: 14px; font-style: normal; }
+.login-field input { flex: 1; min-width: 0; height: 100%; color: #18191c; background: transparent; border: 0; outline: 0; font-size: 15px; }
+.login-submit { height: 44px; margin-top: 32px; color: #fff; background: #fb7299; border: 0; border-radius: 6px; font-size: 16px; cursor: pointer; }
+.login-submit:hover { background: #fc8bab; }
+.login-note { margin: auto 0 24px; color: #9499a0; font-size: 12px; line-height: 20px; text-align: center; }
+.login-note a { color: #fb7299; cursor: pointer; }
+.dark .login-window { background: #20232f; }
+.dark .login-left { border-color: #343b49; }
+.dark .login-left h2, .dark .login-tabs button, .dark .login-prefix, .dark .login-field input { color: #edf2fb; }
+.dark .login-form { border-color: #343b49; }
+.dark .login-field + .login-field { border-color: #343b49; }
+.dark .login-qr { background: #fff; }
+.dark .login-close { color: #b6bdc9; }
+@media (max-width: 820px) { .login-window { min-height: 0; padding: 34px 22px 0; } .login-left { display: none; } .login-right { padding: 20px 0 0; } }
