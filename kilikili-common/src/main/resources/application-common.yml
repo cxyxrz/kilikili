@@ -40,7 +40,5 @@ kilikili:
     access-key: ${MINIO_ACCESS_KEY:minioadmin}
     secret-key: ${MINIO_SECRET_KEY:minioadmin}
     bucket: ${MINIO_BUCKET:kilikili}
-  ai:
-    deepseek-api-key: ${DEEPSEEK_API_KEY:}
   auth:
     session-ttl-days: 7

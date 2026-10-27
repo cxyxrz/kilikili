@@ -4,19 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.Map;
-
 /**
- * DeepSeek Chat Completions 客户端，对视频文本信息做内容安全初审。
+ * 基于 Spring AI ChatClient 的内容安全初审。api-key 未配置时 Spring AI 不会创建客户端，
+ * 此时 available() 为 false，审核任务自动跳过。
  */
 @Component
 public class DeepSeekClient {
@@ -32,50 +26,28 @@ public class DeepSeekClient {
             其中 score 表示风险分（越高越危险），无风险时 tags 为空数组。
             """;
 
-    private final AiReviewProperties properties;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final ChatClient chatClient;
 
-    public DeepSeekClient(AiReviewProperties properties, ObjectMapper objectMapper) {
-        this.properties = properties;
+    public DeepSeekClient(ObjectMapper objectMapper, ObjectProvider<ChatClient.Builder> chatClientBuilder) {
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
+        this.chatClient = builder == null ? null : builder.defaultSystem(SYSTEM_PROMPT).build();
+    }
+
+    public boolean available() {
+        return chatClient != null;
     }
 
     public Verdict review(AiReviewSource source) {
+        if (chatClient == null) throw new IllegalStateException("未配置 DEEPSEEK_API_KEY");
         String content;
         try {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("model", properties.model());
-            payload.put("temperature", 0);
-            payload.put("response_format", Map.of("type", "json_object"));
-            payload.put("messages", new Object[]{
-                    Map.of("role", "system", "content", SYSTEM_PROMPT),
-                    Map.of("role", "user", "content", userPrompt(source))
-            });
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(trimBaseUrl() + "/chat/completions"))
-                    .timeout(Duration.ofSeconds(Math.max(5, properties.timeoutSeconds())))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + properties.deepseekApiKey())
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() != 200) {
-                throw new IllegalStateException("DeepSeek 返回状态码 " + response.statusCode() + "：" + abbreviate(response.body()));
-            }
-            content = objectMapper.readTree(response.body())
-                    .path("choices").path(0).path("message").path("content").asText("");
-            if (content.isBlank()) throw new IllegalStateException("DeepSeek 返回内容为空");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("AI 审核被中断", e);
+            content = chatClient.prompt().user(userPrompt(source)).call().content();
         } catch (Exception e) {
-            if (e instanceof IllegalStateException state) throw state;
             throw new IllegalStateException("调用 DeepSeek 失败：" + e.getMessage(), e);
         }
+        if (content == null || content.isBlank()) throw new IllegalStateException("DeepSeek 返回内容为空");
         return parse(content);
     }
 
@@ -113,7 +85,7 @@ public class DeepSeekClient {
             if (tags.length() > 0) reason = reason.isEmpty() ? tags.toString() : reason + "（" + tags + "）";
             return new Verdict(result, score, truncate(reason, 480), truncate(content, 2000));
         } catch (Exception e) {
-            log.warn("DeepSeek 返回内容无法解析为 JSON：{}", abbreviate(content));
+            log.warn("DeepSeek 返回内容无法解析为 JSON：{}", truncate(content, 500));
             throw new IllegalStateException("AI 审核结果解析失败", e);
         }
     }
@@ -128,18 +100,8 @@ public class DeepSeekClient {
         return text.substring(firstLine + 1, lastFence).trim();
     }
 
-    private String trimBaseUrl() {
-        String base = properties.baseUrl() == null || properties.baseUrl().isBlank()
-                ? "https://api.deepseek.com" : properties.baseUrl().trim();
-        return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
-    }
-
     private static String nullToEmpty(String value) {
         return value == null ? "" : value;
-    }
-
-    private static String abbreviate(String value) {
-        return truncate(value, 500);
     }
 
     private static String truncate(String value, int max) {

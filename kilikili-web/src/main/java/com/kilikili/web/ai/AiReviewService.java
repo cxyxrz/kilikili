@@ -35,7 +35,7 @@ public class AiReviewService {
     @Scheduled(initialDelayString = "${kilikili.ai.initial-delay-ms:10000}",
             fixedDelayString = "${kilikili.ai.poll-interval-ms:20000}")
     public void poll() {
-        if (!properties.available()) {
+        if (!properties.enabled() || !deepSeekClient.available()) {
             if (!missingKeyLogged) {
                 log.warn("AI 审核未启用：请设置环境变量 DEEPSEEK_API_KEY（或 kilikili.ai.enabled=false 关闭）");
                 missingKeyLogged = true;
