@@ -122,7 +122,38 @@ const creatorTab = ref<"manage" | "upload" | "stats">("manage");
 const creatorVideos = ref<CreatorVideo[]>([]);
 const creatorKeyword = ref("");
 const creatorStatus = ref("");
-const creatorStats = ref<Record<string, number>>({});
+type TrendPoint = { date: string; label: string; views: number; likes: number; comments: number; followers: number };
+type AudienceItem = { label: string; count: number };
+type CreatorVideoStat = {
+  id: number;
+  title: string;
+  coverUrl?: string | null;
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  favoriteCount: number;
+  createdAt: string;
+  interactionRate: number;
+};
+type CreatorDashboard = {
+  days: number;
+  overview: {
+    videoCount: number;
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+    favoriteCount: number;
+    followerCount: number;
+  };
+  period: { views: number; likes: number; comments: number; favorites: number; followers: number };
+  trend: TrendPoint[];
+  audience: { gender: AudienceItem[]; age: AudienceItem[]; hours: { hour: number; count: number }[] };
+  videos: CreatorVideoStat[];
+};
+const dashboard = ref<CreatorDashboard | null>(null);
+const dashboardDays = ref<7 | 30>(7);
+const dashboardMetric = ref<"views" | "likes" | "comments" | "followers">("views");
+const dashboardLoading = ref(false);
 const historyVideos = ref<HistoryVideo[]>([]);
 const historyLoading = ref(false);
 const favoriteVideos = ref<FavoriteVideo[]>([]);
@@ -159,6 +190,8 @@ const selected = ref<Video | null>(null);
 const playUrl = ref("");
 const comments = ref<Comment[]>([]);
 const commentSort = ref<"hot" | "latest">("hot");
+// 右栏标签：简介（含 UP 信息与接下来播放）/ 评论
+const watchTab = ref<"about" | "comments">("about");
 const replyTo = ref<Comment | null>(null);
 const notice = ref("");
 const authVisible = ref(false);
@@ -719,16 +752,66 @@ async function loadCreatorVideos() {
     fail(error);
   }
 }
-async function loadCreatorStats() {
+async function loadCreatorDashboard(days: 7 | 30 = dashboardDays.value) {
   if (!loggedIn.value) return;
+  dashboardDays.value = days;
+  dashboardLoading.value = true;
   try {
-    creatorStats.value = (
-      await axios.get("/api/videos/mine/stats", { headers: authHeaders() })
+    dashboard.value = (
+      await axios.get("/api/creator/dashboard", {
+        headers: authHeaders(),
+        params: { days },
+      })
     ).data.data;
   } catch (error) {
     fail(error);
+  } finally {
+    dashboardLoading.value = false;
   }
 }
+const trendPoints = computed(() => dashboard.value?.trend || []);
+const trendChart = computed(() => {
+  const points = trendPoints.value;
+  const metric = dashboardMetric.value;
+  const width = 760;
+  const height = 240;
+  const left = 48;
+  const right = 16;
+  const top = 18;
+  const bottom = 26;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const rawMax = Math.max(1, ...points.map((point) => point[metric]));
+  const step = Math.max(1, Math.ceil(rawMax / 4));
+  const max = step * 4;
+  const coords = points.map((point, index) => ({
+    x: left + (points.length === 1 ? plotWidth / 2 : (plotWidth * index) / (points.length - 1)),
+    y: top + plotHeight - (point[metric] / max) * plotHeight,
+    label: point.label,
+    value: point[metric],
+  }));
+  const line = coords.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const baseline = top + plotHeight;
+  const area = coords.length
+    ? `${line} L${coords[coords.length - 1].x.toFixed(1)},${baseline} L${coords[0].x.toFixed(1)},${baseline} Z`
+    : "";
+  const ticks = [0, 1, 2, 3, 4].map((index) => ({
+    y: baseline - (plotHeight * index) / 4,
+    value: step * index,
+  }));
+  // 天数较多时隔几个点显示横轴标签，避免拥挤
+  const labelEvery = Math.ceil(points.length / 8);
+  return { width, height, left, right, top, bottom, plotWidth, plotHeight, coords, line, area, ticks, baseline, labelEvery };
+});
+const audienceTotal = computed(() =>
+  (dashboard.value?.audience.gender || []).reduce((sum, item) => sum + item.count, 0),
+);
+const audienceMax = computed(() => {
+  const counts = [...(dashboard.value?.audience.age || []), ...(dashboard.value?.audience.gender || [])].map((item) => item.count);
+  return Math.max(1, ...counts);
+});
+const hoursMax = computed(() => Math.max(1, ...(dashboard.value?.audience.hours || []).map((item) => item.count)));
+const maxVideoViews = computed(() => Math.max(1, ...(dashboard.value?.videos || []).map((video) => video.viewCount)));
 async function loadHistory() {
   if (!loggedIn.value) {
     historyVideos.value = [];
@@ -1261,7 +1344,7 @@ function navigate(page: Page) {
   if (page === "search") loadSearchResults();
   if (page === "create" && loggedIn.value) {
     loadCreatorVideos();
-    loadCreatorStats();
+    loadCreatorDashboard();
   }
 }
 function showUploadWarning(message: string) {
@@ -1375,6 +1458,8 @@ async function openVideo(video: Video) {
     const response = (await axios.get(`/api/videos/${video.id}`)).data.data;
     selected.value = { ...video, ...response.video };
     playUrl.value = response.playUrl;
+    // 切换视频后回到「简介」标签
+    watchTab.value = "about";
     // 重置播放器状态，避免沿用上一个视频的进度/时长
     currentTime.value = 0;
     duration.value = 0;
@@ -1687,126 +1772,155 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </section>
-              <section class="watch-detail-card">
-                <h1>{{ selected.title }}</h1>
-                <div class="watch-up-row">
-                  <div class="watch-up-avatar" title="查看个人主页" @click="selected.authorId && openSpace(selected.authorId)">
-                    <img v-if="selected.authorAvatar" :src="selected.authorAvatar" :alt="selected.authorName" />
-                    <span v-else>{{ selected.authorName.slice(0, 1).toUpperCase() }}</span>
-                  </div>
-                  <div class="watch-up-info">
-                    <h2 class="clickable-name" @click="selected.authorId && openSpace(selected.authorId)">{{ selected.authorName }}</h2>
-                    <p>{{ formatCount(selected.likeCount) }} 获赞 · {{ formatCount(selected.viewCount) }} 播放</p>
-                  </div>
-                  <button class="follow-button" :class="{ followed: isFollowingSelected }" @click="toggleAuthorFollow">
-                    {{ isFollowingSelected ? "✓ 已关注" : "+ 关注" }}
-                  </button>
-                </div>
-                <div class="watch-bar">
-                  <p class="watch-meta">
-                    ◉ {{ formatCount(selected.viewCount) }} 播放　▣
-                    {{ formatCount(selected.commentCount) }} 弹幕　{{
-                    formatDate(selected.createdAt || "")
-                  }}
-                  </p>
-                  <div class="watch-actions">
-                    <button class="watch-like" @click="like">
-                      ♥ {{ selected.likeCount }}
-                    </button>
-                    <button @click="watchAction('投币')">◉ 投币</button>
-                    <button :class="{ active: selectedFavorited }" @click="toggleFavorite">{{ selectedFavorited ? '★ 已收藏' : '☆ 收藏' }}</button>
-                  </div>
-                </div>
-                <p v-if="selected.description" class="watch-description">
-                  {{ selected.description }}
-                </p>
-              </section>
-              <section class="watch-comment-panel">
-                <header class="comment-header">
-                  <h2>评论</h2>
-                  <div class="comment-sort">
-                    <button :class="{ active: commentSort === 'hot' }" @click="commentSort = 'hot'">最热</button>
-                    <button :class="{ active: commentSort === 'latest' }" @click="commentSort = 'latest'">最新</button>
-                  </div>
-                </header>
-                <div v-if="loggedIn" class="comment-composer">
-                  <div class="comment-avatar">
-                    <img v-if="profile.avatar" :src="profile.avatar" alt="我的头像"><span v-else>{{ avatarText }}</span>
-                  </div>
-                  <div class="comment-editor">
-                    <textarea v-model="comment" maxlength="500" placeholder="发一条友善的评论吧…"></textarea>
-                    <small>{{ comment.length }} / 500</small>
-                    <button @click="sendComment">发表评论</button>
-                  </div>
-                </div>
-                <button v-else class="comment-login" @click="openAuth()">登录后参与评论</button>
-                <div v-if="false" class="comment-feed">
-                  <article v-for="item in sortedComments" :key="item.id" class="comment-item">
-                    <div class="comment-avatar">
-                      <img v-if="item.avatar" :src="item.avatar || undefined" :alt="item.nickname"><span v-else>{{ item.nickname.slice(0, 1) }}</span>
-                    </div>
-                    <div class="comment-content">
-                      <p class="comment-user">{{ item.nickname }} <small>{{ formatHistoryTime(item.createdAt || '') }}</small></p>
-                      <p class="comment-text">{{ item.content }}</p>
-                      <div class="comment-actions"><button @click="watchAction('评论点赞')">♡ 赞</button><button @click="watchAction('评论回复')">▣ 回复</button></div>
-                    </div>
-                  </article>
-                  <p v-if="!sortedComments.length" class="comment-empty">暂无评论，来留下第一条评论吧</p>
-                </div>
-                <div class="comment-thread">
-                  <article v-for="item in topLevelComments" :key="item.id" class="comment-item">
-                    <div class="comment-avatar">
-                      <img v-if="item.avatar" :src="item.avatar || undefined" :alt="item.nickname"><span v-else>{{ item.nickname.slice(0, 1) }}</span>
-                    </div>
-                    <div class="comment-content">
-                      <p class="comment-user">{{ item.nickname }} <small>{{ formatHistoryTime(item.createdAt || '') }}</small></p>
-                      <p class="comment-text">{{ item.content }}</p>
-                      <div class="comment-actions">
-                        <button @click="watchAction('评论点赞')">♡ 赞</button>
-                        <button class="reply-trigger" @click="startReply(item)"><span class="reply-icon"></span>回复</button>
-                      </div>
-                      <div v-if="repliesFor(item.id).length" class="reply-list">
-                        <article v-for="reply in repliesFor(item.id)" :key="reply.id" class="reply-item">
-                          <div class="comment-avatar small"><img v-if="reply.avatar" :src="reply.avatar || undefined" :alt="reply.nickname"><span v-else>{{ reply.nickname.slice(0, 1) }}</span></div>
-                          <div class="comment-content"><p class="comment-user">{{ reply.nickname }} <small>{{ formatHistoryTime(reply.createdAt || '') }}</small></p><p class="comment-text">{{ reply.content }}</p></div>
-                        </article>
-                      </div>
-                      <div v-if="replyTo?.id === item.id" class="reply-editor">
-                        <textarea v-model="replyContent" maxlength="500" :placeholder="`回复 @${item.nickname}`" @keyup.ctrl.enter="sendReply"></textarea>
-                        <div><small>{{ replyContent.length }} / 500</small><button @click="cancelReply">取消</button><button class="primary-reply" @click="sendReply">回复</button></div>
-                      </div>
-                    </div>
-                  </article>
-                  <p v-if="!topLevelComments.length" class="comment-empty">暂无评论，来留下第一条评论吧</p>
-                </div>
-              </section>
             </div>
-            <aside class="related-section">
-              <h2>相关推荐</h2>
-              <div class="related-list">
-                <article
-                  v-for="video in relatedVideos"
-                  :key="video.id"
-                  class="related-video"
-                  @click="openVideo(video)"
-                >
-                  <div class="related-cover">
-                    <img
-                      v-if="video.coverUrl"
-                      :src="video.coverUrl"
-                      :alt="video.title"
-                    /><span v-else>▶</span
-                    ><em>{{ formatDuration(video.durationSeconds) }}</em>
+            <aside class="watch-aside">
+              <nav class="watch-tabs">
+                <button :class="{ active: watchTab === 'about' }" @click="watchTab = 'about'">简介</button>
+                <button :class="{ active: watchTab === 'comments' }" @click="watchTab = 'comments'">评论 <em>{{ formatCount(selected.commentCount) }}</em></button>
+              </nav>
+              <template v-if="watchTab === 'about'">
+                  <section class="watch-detail-card">
+                    <div class="watch-up-row">
+                      <div class="watch-up-avatar" title="查看个人主页" @click="selected.authorId && openSpace(selected.authorId)">
+                        <img v-if="selected.authorAvatar" :src="selected.authorAvatar" :alt="selected.authorName" />
+                        <span v-else>{{ selected.authorName.slice(0, 1).toUpperCase() }}</span>
+                      </div>
+                      <div class="watch-up-info">
+                        <h2 class="clickable-name" @click="selected.authorId && openSpace(selected.authorId)">{{ selected.authorName }}</h2>
+                        <p>{{ formatCount(selected.likeCount) }} 获赞 · {{ formatCount(selected.viewCount) }} 播放</p>
+                      </div>
+                      <button class="follow-button" :class="{ followed: isFollowingSelected }" @click="toggleAuthorFollow">
+                        {{ isFollowingSelected ? "✓ 已关注" : "+ 关注" }}
+                      </button>
+                    </div>
+                    <h1>{{ selected.title }}</h1>
+                    <div class="watch-bar">
+                      <p class="watch-meta">
+                        ◉ {{ formatCount(selected.viewCount) }} 播放　▣
+                        {{ formatCount(selected.commentCount) }} 弹幕　{{
+                        formatDate(selected.createdAt || "")
+                      }}
+                      </p>
+                      <div class="watch-actions">
+                        <button class="watch-like" @click="like">
+                          ♥ {{ selected.likeCount }}
+                        </button>
+                        <button @click="watchAction('投币')">◉ 投币</button>
+                        <button :class="{ active: selectedFavorited }" @click="toggleFavorite">{{ selectedFavorited ? '★ 已收藏' : '☆ 收藏' }}</button>
+                      </div>
+                    </div>
+                    <p v-if="selected.description" class="watch-description">
+                      {{ selected.description }}
+                    </p>
+                  </section>
+                <div class="related-section">
+                  <h2>接下来播放</h2>
+    <div class="related-list">
+                    <article
+                      v-for="video in relatedVideos"
+                      :key="video.id"
+                      class="related-video"
+                      @click="openVideo(video)"
+                    >
+                      <div class="related-cover">
+                        <img
+                          v-if="video.coverUrl"
+                          :src="video.coverUrl"
+                          :alt="video.title"
+                        /><span v-else>▶</span
+                        ><em>{{ formatDuration(video.durationSeconds) }}</em>
+                      </div>
+                      <div class="related-meta">
+                        <h3>{{ video.title }}</h3>
+                        <p class="related-up"><i>UP</i>{{ video.authorName }}</p>
+                        <p class="related-stats">
+                          <span
+                            ><svg viewBox="0 0 16 16" aria-hidden="true"
+                              ><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.2" /><path
+                                d="M6.6 5.3 10.4 8l-3.8 2.7z"
+                                fill="currentColor" /></svg
+                            >{{ formatCount(video.viewCount) }}</span
+                          >
+                          <span
+                            ><svg viewBox="0 0 16 16" aria-hidden="true"
+                              ><path
+                                d="M2.4 3.2h11.2v7.1H7.1L4.4 12.6V10.3H2.4z"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.2"
+                                stroke-linejoin="round" /></svg
+                            >{{ formatCount(video.commentCount) }}</span
+                          >
+                        </p>
+                      </div>
+                    </article>
+                    <p v-if="!relatedVideos.length" class="related-empty">
+                      暂无相关推荐
+                    </p>
                   </div>
-                  <div>
-                    <h3>{{ video.title }}</h3>
-                    <p>{{ formatCount(video.viewCount) }} 次播放</p>
-                  </div>
-                </article>
-                <p v-if="!relatedVideos.length" class="related-empty">
-                  暂无相关推荐
-                </p>
-              </div>
+                </div>
+              </template>
+              <template v-else>
+                  <section class="watch-comment-panel">
+                    <header class="comment-header">
+                      <h2>评论</h2>
+                      <div class="comment-sort">
+                        <button :class="{ active: commentSort === 'hot' }" @click="commentSort = 'hot'">最热</button>
+                        <button :class="{ active: commentSort === 'latest' }" @click="commentSort = 'latest'">最新</button>
+                      </div>
+                    </header>
+                    <div v-if="loggedIn" class="comment-composer">
+                      <div class="comment-avatar">
+                        <img v-if="profile.avatar" :src="profile.avatar" alt="我的头像"><span v-else>{{ avatarText }}</span>
+                      </div>
+                      <div class="comment-editor">
+                        <textarea v-model="comment" maxlength="500" placeholder="发一条友善的评论吧…"></textarea>
+                        <small>{{ comment.length }} / 500</small>
+                        <button @click="sendComment">发表评论</button>
+                      </div>
+                    </div>
+                    <button v-else class="comment-login" @click="openAuth()">登录后参与评论</button>
+                    <div v-if="false" class="comment-feed">
+                      <article v-for="item in sortedComments" :key="item.id" class="comment-item">
+                        <div class="comment-avatar">
+                          <img v-if="item.avatar" :src="item.avatar || undefined" :alt="item.nickname"><span v-else>{{ item.nickname.slice(0, 1) }}</span>
+                        </div>
+                        <div class="comment-content">
+                          <p class="comment-user">{{ item.nickname }} <small>{{ formatHistoryTime(item.createdAt || '') }}</small></p>
+                          <p class="comment-text">{{ item.content }}</p>
+                          <div class="comment-actions"><button @click="watchAction('评论点赞')">♡ 赞</button><button @click="watchAction('评论回复')">▣ 回复</button></div>
+                        </div>
+                      </article>
+                      <p v-if="!sortedComments.length" class="comment-empty">暂无评论，来留下第一条评论吧</p>
+                    </div>
+                    <div class="comment-thread">
+                      <article v-for="item in topLevelComments" :key="item.id" class="comment-item">
+                        <div class="comment-avatar">
+                          <img v-if="item.avatar" :src="item.avatar || undefined" :alt="item.nickname"><span v-else>{{ item.nickname.slice(0, 1) }}</span>
+                        </div>
+                        <div class="comment-content">
+                          <p class="comment-user">{{ item.nickname }} <small>{{ formatHistoryTime(item.createdAt || '') }}</small></p>
+                          <p class="comment-text">{{ item.content }}</p>
+                          <div class="comment-actions">
+                            <button @click="watchAction('评论点赞')">♡ 赞</button>
+                            <button class="reply-trigger" @click="startReply(item)"><span class="reply-icon"></span>回复</button>
+                          </div>
+                          <div v-if="repliesFor(item.id).length" class="reply-list">
+                            <article v-for="reply in repliesFor(item.id)" :key="reply.id" class="reply-item">
+                              <div class="comment-avatar small"><img v-if="reply.avatar" :src="reply.avatar || undefined" :alt="reply.nickname"><span v-else>{{ reply.nickname.slice(0, 1) }}</span></div>
+                              <div class="comment-content"><p class="comment-user">{{ reply.nickname }} <small>{{ formatHistoryTime(reply.createdAt || '') }}</small></p><p class="comment-text">{{ reply.content }}</p></div>
+                            </article>
+                          </div>
+                          <div v-if="replyTo?.id === item.id" class="reply-editor">
+                            <textarea v-model="replyContent" maxlength="500" :placeholder="`回复 @${item.nickname}`" @keyup.ctrl.enter="sendReply"></textarea>
+                            <div><small>{{ replyContent.length }} / 500</small><button @click="cancelReply">取消</button><button class="primary-reply" @click="sendReply">回复</button></div>
+                          </div>
+                        </div>
+                      </article>
+                      <p v-if="!topLevelComments.length" class="comment-empty">暂无评论，来留下第一条评论吧</p>
+                    </div>
+                  </section>
+              </template>
             </aside>
           </section>
           <div v-if="selected && false" class="legacy-watch-content">
@@ -1863,10 +1977,10 @@ onBeforeUnmount(() => {
                 :class="{ active: creatorTab === 'stats' }"
                 @click="
                   creatorTab = 'stats';
-                  loadCreatorStats();
+                  loadCreatorDashboard();
                 "
               >
-                ▥ 数据统计
+                ▥ 数据看板
               </button>
             </div>
             <template v-if="creatorTab === 'manage'"
@@ -2145,23 +2259,195 @@ onBeforeUnmount(() => {
                 </div>
               </section>
             </section>
-            <section v-else class="creator-stat-grid">
-              <article>
-                <b>{{ creatorStats.videoCount || 0 }}</b
-                ><span>投稿视频</span>
-              </article>
-              <article>
-                <b>{{ creatorStats.viewCount || 0 }}</b
-                ><span>总播放量</span>
-              </article>
-              <article>
-                <b>{{ creatorStats.likeCount || 0 }}</b
-                ><span>累计点赞</span>
-              </article>
-              <article>
-                <b>{{ creatorStats.commentCount || 0 }}</b
-                ><span>累计评论</span>
-              </article>
+            <section v-else class="creator-dashboard">
+              <header class="dash-head">
+                <div>
+                  <h2>数据看板</h2>
+                  <p>统计范围：已发布视频，共 {{ dashboard?.overview.videoCount || 0 }} 个</p>
+                </div>
+                <div class="dash-range">
+                  <button :class="{ active: dashboardDays === 7 }" @click="loadCreatorDashboard(7)">近 7 天</button>
+                  <button :class="{ active: dashboardDays === 30 }" @click="loadCreatorDashboard(30)">近 30 天</button>
+                </div>
+              </header>
+              <p v-if="dashboardLoading && !dashboard" class="load-status">正在加载数据…</p>
+              <template v-else-if="dashboard">
+                <div class="dash-cards">
+                  <article>
+                    <span>总播放量</span>
+                    <b>{{ formatCount(dashboard.overview.viewCount) }}</b>
+                    <em>近 {{ dashboard.days }} 天 +{{ formatCount(dashboard.period.views) }}</em>
+                  </article>
+                  <article>
+                    <span>总点赞</span>
+                    <b>{{ formatCount(dashboard.overview.likeCount) }}</b>
+                    <em>近 {{ dashboard.days }} 天 +{{ formatCount(dashboard.period.likes) }}</em>
+                  </article>
+                  <article>
+                    <span>总评论</span>
+                    <b>{{ formatCount(dashboard.overview.commentCount) }}</b>
+                    <em>近 {{ dashboard.days }} 天 +{{ formatCount(dashboard.period.comments) }}</em>
+                  </article>
+                  <article>
+                    <span>总收藏</span>
+                    <b>{{ formatCount(dashboard.overview.favoriteCount) }}</b>
+                    <em>近 {{ dashboard.days }} 天 +{{ formatCount(dashboard.period.favorites) }}</em>
+                  </article>
+                  <article>
+                    <span>粉丝数</span>
+                    <b>{{ formatCount(dashboard.overview.followerCount) }}</b>
+                    <em>近 {{ dashboard.days }} 天 +{{ formatCount(dashboard.period.followers) }}</em>
+                  </article>
+                </div>
+
+                <section class="dash-panel">
+                  <header class="dash-panel-head">
+                    <h3>数据趋势</h3>
+                    <div class="dash-metrics">
+                      <button :class="{ active: dashboardMetric === 'views' }" @click="dashboardMetric = 'views'">播放</button>
+                      <button :class="{ active: dashboardMetric === 'likes' }" @click="dashboardMetric = 'likes'">点赞</button>
+                      <button :class="{ active: dashboardMetric === 'comments' }" @click="dashboardMetric = 'comments'">评论</button>
+                      <button :class="{ active: dashboardMetric === 'followers' }" @click="dashboardMetric = 'followers'">涨粉</button>
+                    </div>
+                  </header>
+                  <svg class="dash-chart" :viewBox="`0 0 ${trendChart.width} ${trendChart.height}`" role="img" aria-label="数据趋势图">
+                    <defs>
+                      <linearGradient id="dashFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#fb7299" stop-opacity="0.26" />
+                        <stop offset="100%" stop-color="#fb7299" stop-opacity="0" />
+                      </linearGradient>
+                    </defs>
+                    <g class="dash-grid">
+                      <line
+                        v-for="tick in trendChart.ticks"
+                        :key="`grid-${tick.value}`"
+                        :x1="trendChart.left"
+                        :x2="trendChart.width - trendChart.right"
+                        :y1="tick.y"
+                        :y2="tick.y"
+                      />
+                    </g>
+                    <text
+                      v-for="tick in trendChart.ticks"
+                      :key="`y-${tick.value}`"
+                      class="dash-axis-text"
+                      :x="trendChart.left - 10"
+                      :y="tick.y + 4"
+                      text-anchor="end"
+                    >
+                      {{ formatCount(tick.value) }}
+                    </text>
+                    <path v-if="trendChart.area" :d="trendChart.area" fill="url(#dashFill)" />
+                    <path v-if="trendChart.line" :d="trendChart.line" fill="none" stroke="#fb7299" stroke-width="2" stroke-linejoin="round" />
+                    <g v-for="(point, index) in trendChart.coords" :key="`dot-${index}`" class="dash-dot">
+                      <circle :cx="point.x" :cy="point.y" r="3.4">
+                        <title>{{ point.label }}：{{ point.value }}</title>
+                      </circle>
+                    </g>
+                    <text
+                      v-for="(point, index) in trendChart.coords"
+                      v-show="index % trendChart.labelEvery === 0 || index === trendChart.coords.length - 1"
+                      :key="`x-${index}`"
+                      class="dash-axis-text"
+                      :x="point.x"
+                      :y="trendChart.height - 6"
+                      text-anchor="middle"
+                    >
+                      {{ point.label }}
+                    </text>
+                  </svg>
+                </section>
+
+                <div class="dash-split">
+                  <section class="dash-panel">
+                    <header class="dash-panel-head">
+                      <h3>观众画像</h3>
+                      <span>基于粉丝资料与观看记录</span>
+                    </header>
+                    <div class="audience-block">
+                      <h4>粉丝性别</h4>
+                      <p v-if="!dashboard.audience.gender.length" class="dash-empty">暂无粉丝数据</p>
+                      <div v-for="item in dashboard.audience.gender" :key="`g-${item.label}`" class="audience-row">
+                        <span>{{ item.label }}</span>
+                        <div class="audience-track"><i :style="{ width: `${Math.max(4, Math.round((item.count * 100) / audienceMax))}%` }"></i></div>
+                        <b>{{ item.count }}</b>
+                        <em>{{ audienceTotal ? Math.round((item.count * 100) / audienceTotal) : 0 }}%</em>
+                      </div>
+                    </div>
+                    <div class="audience-block">
+                      <h4>粉丝年龄</h4>
+                      <p v-if="!dashboard.audience.age.length" class="dash-empty">暂无粉丝数据</p>
+                      <div v-for="item in dashboard.audience.age" :key="`a-${item.label}`" class="audience-row">
+                        <span>{{ item.label }}</span>
+                        <div class="audience-track"><i :style="{ width: `${Math.max(4, Math.round((item.count * 100) / audienceMax))}%` }"></i></div>
+                        <b>{{ item.count }}</b>
+                        <em>{{ audienceTotal ? Math.round((item.count * 100) / audienceTotal) : 0 }}%</em>
+                      </div>
+                    </div>
+                  </section>
+                  <section class="dash-panel">
+                    <header class="dash-panel-head">
+                      <h3>观众活跃时段</h3>
+                      <span>登录用户播放时刻分布</span>
+                    </header>
+                    <div class="hour-bars">
+                      <div
+                        v-for="item in dashboard.audience.hours"
+                        :key="item.hour"
+                        class="hour-bar"
+                        :title="`${item.hour}:00 - ${item.hour + 1}:00：${item.count} 次播放`"
+                      >
+                        <i :style="{ height: `${Math.max(3, Math.round((item.count * 100) / hoursMax))}%` }"></i>
+                        <span v-if="item.hour % 4 === 0">{{ item.hour }}</span>
+                      </div>
+                    </div>
+                    <p class="hour-tip">悬停柱状图可查看具体时段播放次数</p>
+                  </section>
+                </div>
+
+                <section class="dash-panel">
+                  <header class="dash-panel-head">
+                    <h3>视频数据对比</h3>
+                    <span>按播放量排序，最多展示 20 条</span>
+                  </header>
+                  <div class="dash-table">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>视频</th>
+                          <th>播放</th>
+                          <th>点赞</th>
+                          <th>评论</th>
+                          <th>收藏</th>
+                          <th>互动率</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="video in dashboard.videos" :key="video.id">
+                          <td class="dash-video-cell">
+                            <div class="table-cover">
+                              <img v-if="video.coverUrl" :src="video.coverUrl" :alt="video.title" /><span v-else>▶</span>
+                            </div>
+                            <div class="dash-video-meta">
+                              <b>{{ video.title }}</b>
+                              <div class="dash-view-bar"><i :style="{ width: `${Math.max(3, Math.round((video.viewCount * 100) / maxVideoViews))}%` }"></i></div>
+                              <small>{{ formatDate(video.createdAt) }}</small>
+                            </div>
+                          </td>
+                          <td>{{ formatCount(video.viewCount) }}</td>
+                          <td>{{ formatCount(video.likeCount) }}</td>
+                          <td>{{ formatCount(video.commentCount) }}</td>
+                          <td>{{ formatCount(video.favoriteCount) }}</td>
+                          <td>{{ video.interactionRate }}%</td>
+                        </tr>
+                        <tr v-if="!dashboard.videos.length">
+                          <td colspan="6" class="no-data">暂无已发布视频</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </template>
             </section>
           </section>
           <template

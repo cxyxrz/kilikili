@@ -14,3 +14,4 @@ logs/
 .env.local
 data/
 .mvn/repository/
+**/application-local.yml
