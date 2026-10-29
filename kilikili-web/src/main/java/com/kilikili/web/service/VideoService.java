@@ -4,6 +4,7 @@ import com.kilikili.common.exception.BusinessException;
 import com.kilikili.common.storage.StorageService;
 import com.kilikili.common.setting.SystemSettingService;
 import com.kilikili.web.entity.TranscodeTask;
+import com.kilikili.web.entity.TranscodeTaskProgress;
 import com.kilikili.web.entity.Video;
 import com.kilikili.web.entity.VideoComment;
 import com.kilikili.web.entity.VideoInsert;
@@ -15,6 +16,7 @@ import com.kilikili.web.entity.Danmaku;
 import com.kilikili.web.entity.FavoriteVideoItem;
 import com.kilikili.web.entity.FavoriteVideoSource;
 import com.kilikili.web.mapper.TranscodeTaskMapper;
+import com.kilikili.web.mapper.TranscodeProgressMapper;
 import com.kilikili.web.mapper.VideoMapper;
 import com.kilikili.web.transcode.TranscodeService;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,7 @@ public class VideoService {
     private final NotificationService notificationService;
     private final SystemSettingService systemSettingService;
     private final TranscodeTaskMapper transcodeTaskMapper;
+    private final TranscodeProgressMapper transcodeProgressMapper;
     private final TranscodeService transcodeService;
     private final RecommendationService recommendationService;
     private final com.kilikili.web.search.VideoSearchIndexService searchIndexService;
@@ -55,6 +58,7 @@ public class VideoService {
 
     public VideoService(VideoMapper videoMapper, StorageService storageService, NotificationService notificationService,
                         SystemSettingService systemSettingService, TranscodeTaskMapper transcodeTaskMapper,
+                        TranscodeProgressMapper transcodeProgressMapper,
                         TranscodeService transcodeService, RecommendationService recommendationService,
                         com.kilikili.web.search.VideoSearchIndexService searchIndexService,
                         com.kilikili.web.mapper.DanmakuInsightMapper danmakuInsightMapper,
@@ -64,6 +68,7 @@ public class VideoService {
         this.notificationService = notificationService;
         this.systemSettingService = systemSettingService;
         this.transcodeTaskMapper = transcodeTaskMapper;
+        this.transcodeProgressMapper = transcodeProgressMapper;
         this.transcodeService = transcodeService;
         this.recommendationService = recommendationService;
         this.searchIndexService = searchIndexService;
@@ -91,7 +96,7 @@ public class VideoService {
             searchIndexService.indexAfterCommit(insert.getId());
         }
         log.info("视频投稿已创建: videoId={}, userId={}, title={}, status={}", insert.getId(), userId, title, status);
-        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status);
+        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status, "videoId", insert.getId());
     }
 
     public Map<String, Object> initUpload(long userId, String filename, String contentType) {
@@ -145,7 +150,7 @@ public class VideoService {
             searchIndexService.indexAfterCommit(insert.getId());
         }
         log.info("分片上传视频投稿已创建: videoId={}, userId={}, title={}, status={}, parts={}", insert.getId(), userId, title, status, sortedPartKeys.size());
-        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status);
+        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status, "videoId", insert.getId());
     }
 
     private UploadSession requireUploadSession(String sessionId, long userId) {
@@ -163,15 +168,25 @@ public class VideoService {
         videoMapper.increaseViews(id);
         log.info("视频开始播放: videoId={}, authorId={}", id, video.authorId());
         TranscodeTask task = transcodeTaskMapper.findLatestByVideoId(id);
-        Map<String, Object> transcodeInfo;
+        Map<String, Object> transcodeInfo = new java.util.LinkedHashMap<>();
         String playUrl;
         if (task != null && "COMPLETED".equals(task.status()) && task.hlsPlaylistKey() != null) {
             playUrl = "/api/videos/" + id + "/stream/master.m3u8";
-            transcodeInfo = Map.of("status", "READY",
-                    "renditions", task.renditions() == null ? List.of() : List.of(task.renditions().split(",")));
+            transcodeInfo.put("status", "READY");
+            transcodeInfo.put("renditions", task.renditions() == null ? List.of() : List.of(task.renditions().split(",")));
+            transcodeInfo.put("percent", 100);
+            transcodeInfo.put("stage", "COMPLETED");
         } else {
             playUrl = storageService.presignedReadUrl(video.objectKey());
-            transcodeInfo = Map.of("status", task == null ? "NONE" : task.status());
+            transcodeInfo.put("status", task == null ? "NONE" : task.status());
+            if (task != null) {
+                TranscodeTaskProgress progress = transcodeProgressMapper.findByTaskId(task.id());
+                transcodeInfo.put("percent", progress == null ? 0 : progress.percent());
+                transcodeInfo.put("stage", progress == null ? task.status() : progress.stage());
+                transcodeInfo.put("message", progress == null ? null : progress.message());
+                transcodeInfo.put("attempt", task.attemptCount());
+                transcodeInfo.put("maxAttempts", task.maxAttempts());
+            }
         }
         return Map.of("video", displayVideo(video), "playUrl", playUrl, "transcode", transcodeInfo);
     }

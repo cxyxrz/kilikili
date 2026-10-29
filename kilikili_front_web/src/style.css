@@ -797,3 +797,16 @@ button.following-avatar:hover img, button.following-avatar:hover > span:first-ch
 .home-search .search-suggest { top: 54px; }
 .dark .home-search .search-box { background: #20232f; border-color: #303545; }
 @media (max-width: 1050px) { .home-search { width: 100%; } }
+
+/* 上传成功弹窗内的转码进度条 */
+.transcode-panel { margin: 6px 0 16px; padding: 14px 16px; text-align: left; background: #f8f9fc; border-radius: 10px; }
+.transcode-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; color: #1d2736; font-size: 13px; }
+.transcode-head b { font-weight: 600; }
+.transcode-head span { color: #fb7299; font-size: 15px; font-weight: 700; }
+.transcode-bar { height: 6px; overflow: hidden; background: #e8ebf2; border-radius: 3px; }
+.transcode-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ff9eb8, #fb7299); border-radius: 3px; transition: width .4s ease; }
+.transcode-hint { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 0; color: #949eaf; font-size: 12px; }
+.transcode-error { color: #e5484d; }
+.dark .transcode-panel { background: #23262f; }
+.dark .transcode-head { color: #e8edf5; }
+.dark .transcode-bar { background: #353a48; }

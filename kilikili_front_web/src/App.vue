@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import Hls from "hls.js";
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 type User = { id: number; username: string; nickname: string };
 type Video = {
@@ -319,6 +319,30 @@ let realtimeRetry = 0;
 let hlsInstance: Hls | null = null;
 const uploadSuccessVisible = ref(false);
 const uploadSuccessMessage = ref("");
+// 转码进度：上传成功后轮询后端，展示阶段/百分比/速度
+const transcodeProgress = ref<{
+  status: string;
+  stage: string;
+  percent: number;
+  message?: string | null;
+  speed?: number | null;
+  etaSeconds?: number | null;
+  attempt?: number | null;
+  maxAttempts?: number | null;
+} | null>(null);
+let transcodePoll = 0;
+const transcodeStageLabels: Record<string, string> = {
+  QUEUED: "排队等待",
+  RUNNING: "准备中",
+  DOWNLOAD: "下载原片",
+  PROBE: "解析视频",
+  TRANSCODE: "转码中",
+  UPLOAD: "回传切片",
+  RETRYING: "等待重试",
+  COMPLETED: "已完成",
+  FAILED: "转码失败",
+  NONE: "等待转码",
+};
 const uploadWarningVisible = ref(false);
 const uploadWarningMessage = ref("");
 // 清晰度以「分辨率高度」标识，菜单优先用后端返回的转码档位填充，hls.js 解析后再校正
@@ -1585,6 +1609,32 @@ function showUploadWarning(message: string) {
   uploadWarningVisible.value = true;
 }
 
+/** 上传成功后轮询转码进度；进入终态（完成/失败）或关闭弹窗时停止 */
+async function pollTranscodeProgress(videoId: number) {
+  window.clearInterval(transcodePoll);
+  const tick = async () => {
+    try {
+      const data = (
+        await axios.get(`/api/videos/${videoId}/transcode/progress`)
+      ).data.data;
+      transcodeProgress.value = data;
+      if (data.status === "COMPLETED" || data.status === "FAILED") {
+        window.clearInterval(transcodePoll);
+      }
+    } catch {
+      // 进度查询失败不打断用户，下一轮继续
+    }
+  };
+  await tick();
+  transcodePoll = window.setInterval(tick, 2000);
+}
+function stopTranscodePoll() {
+  window.clearInterval(transcodePoll);
+}
+watch(uploadSuccessVisible, (visible) => {
+  if (!visible) stopTranscodePoll();
+});
+
 async function sendUpload() {
   if (!upload.value.file) {
     showUploadWarning("「视频文件」未选择，请先选择要上传的视频");
@@ -1598,6 +1648,7 @@ async function sendUpload() {
     showUploadWarning("「视频标题」未填写，请填写后再提交");
     return;
   }
+  let publishedVideoId = 0;
   try {
     const file = upload.value.file;
     const CHUNK_SIZE = 5 * 1024 * 1024;
@@ -1637,7 +1688,7 @@ async function sendUpload() {
       completeForm.append("durationSeconds", String(upload.value.durationSeconds));
       completeForm.append("creationDeclaration", upload.value.creationDeclaration);
       completeForm.append("cover", upload.value.cover);
-      notice.value = (
+      const completeData = (
         await axios.post(
           "/api/videos/upload/complete",
           completeForm,
@@ -1646,7 +1697,9 @@ async function sendUpload() {
             headers: { ...authHeaders(), "Content-Type": "multipart/form-data" },
           },
         )
-      ).data.data.message;
+      ).data.data;
+      notice.value = completeData.message;
+      publishedVideoId = completeData.videoId ?? 0;
     } else {
       const form = new FormData();
       form.append("title", upload.value.title);
@@ -1656,14 +1709,18 @@ async function sendUpload() {
       form.append("creationDeclaration", upload.value.creationDeclaration);
       form.append("cover", upload.value.cover);
       form.append("file", upload.value.file);
-      notice.value = (
+      const uploadData = (
         await axios.post("/api/videos/upload", form, { headers: authHeaders() })
-      ).data.data.message;
+      ).data.data;
+      notice.value = uploadData.message;
+      publishedVideoId = uploadData.videoId ?? 0;
     }
 
     uploadSuccessMessage.value = notice.value || "投稿提交成功";
     uploadWarningVisible.value = false;
+    transcodeProgress.value = null;
     uploadSuccessVisible.value = true;
+    if (publishedVideoId > 0) pollTranscodeProgress(publishedVideoId);
 
     if (coverPreview.value) URL.revokeObjectURL(coverPreview.value);
     coverPreview.value = "";
@@ -3682,7 +3739,35 @@ onBeforeUnmount(() => {
         <div class="success-icon">✓</div>
         <h2>上传成功</h2>
         <p>{{ uploadSuccessMessage }}</p>
-        <p class="muted">视频正在后台转码，完成后将支持多清晰度播放</p>
+        <div v-if="transcodeProgress" class="transcode-panel">
+          <div class="transcode-head">
+            <b>{{
+              transcodeStageLabels[transcodeProgress.stage] ||
+              transcodeProgress.stage
+            }}</b>
+            <span>{{ transcodeProgress.percent ?? 0 }}%</span>
+          </div>
+          <div class="transcode-bar">
+            <i :style="{ width: (transcodeProgress.percent ?? 0) + '%' }"></i>
+          </div>
+          <p class="transcode-hint">
+            <span v-if="transcodeProgress.attempt && transcodeProgress.attempt > 1"
+              >第 {{ transcodeProgress.attempt }}/{{
+                transcodeProgress.maxAttempts
+              }}
+              次尝试</span
+            >
+            <span v-if="transcodeProgress.speed"
+              >{{ transcodeProgress.speed }}x</span
+            >
+            <span v-if="transcodeProgress.etaSeconds"
+              >约剩 {{ transcodeProgress.etaSeconds }} 秒</span
+            >
+            <span v-if="transcodeProgress.status === 'FAILED'" class="transcode-error"
+              >{{ transcodeProgress.message || "转码失败，可稍后重试" }}</span
+            >
+          </p>
+        </div>
         <button class="primary" @click="uploadSuccessVisible = false">知道了</button>
       </section>
     </div>

@@ -88,6 +88,12 @@ kilikili:
     poll-interval-ms: ${TRANSCODE_POLL_INTERVAL_MS:10000}
     max-attempts: ${TRANSCODE_MAX_ATTEMPTS:3}
     max-concurrency: ${TRANSCODE_MAX_CONCURRENCY:2}
+    # HLS 切片时长（秒），强制关键帧对齐保证切片可独立解码
+    segment-seconds: ${TRANSCODE_SEGMENT_SECONDS:6}
+    # 失败重试指数退避：首次 5s，之后翻倍，上限 60s
+    retry-backoff-ms: ${TRANSCODE_RETRY_BACKOFF_MS:5000}
+    retry-backoff-max-ms: ${TRANSCODE_RETRY_BACKOFF_MAX_MS:60000}
+    video-preset: ${TRANSCODE_VIDEO_PRESET:veryfast}
     renditions:
       - name: 480p
         height: 480

@@ -297,3 +297,31 @@ INSERT IGNORE INTO sensitive_word(word, action) VALUES
   ('二维码', 'REVIEW'),
   ('站外链接', 'REVIEW'),
   ('低价出', 'REVIEW');
+-- 转码进度回传：每个任务一行，阶段 + 百分比 + 实时速度
+CREATE TABLE IF NOT EXISTS transcode_task_progress (
+  task_id BIGINT PRIMARY KEY,
+  video_id BIGINT NOT NULL,
+  percent INT NOT NULL DEFAULT 0,
+  stage VARCHAR(24) NOT NULL DEFAULT 'QUEUED',
+  fps DECIMAL(10,2) NULL,
+  speed DECIMAL(10,2) NULL,
+  eta_seconds INT NULL,
+  message VARCHAR(500) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_transcode_progress_video (video_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 每次转码尝试的明细，用于重试统计与成功率/耗时观测
+CREATE TABLE IF NOT EXISTS transcode_task_attempt (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  video_id BIGINT NOT NULL,
+  attempt_no INT NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  error_message VARCHAR(1000) NULL,
+  started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at DATETIME NULL,
+  duration_ms BIGINT NULL,
+  INDEX idx_transcode_attempt_task (task_id),
+  INDEX idx_transcode_attempt_status_started (status, started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
