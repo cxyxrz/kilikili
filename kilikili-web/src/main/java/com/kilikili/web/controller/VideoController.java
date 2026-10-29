@@ -11,6 +11,7 @@ import com.kilikili.web.entity.Video;
 import com.kilikili.web.entity.VideoComment;
 import com.kilikili.web.progress.PlayProgressService;
 import com.kilikili.web.progress.PlayProgressSnapshot;
+import com.kilikili.web.service.DanmakuMaskService;
 import com.kilikili.web.service.VideoService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -35,8 +36,11 @@ public class VideoController {
     private final VideoService videoService;
     private final AuthService authService;
     private final PlayProgressService playProgressService;
-    public VideoController(VideoService videoService, AuthService authService, PlayProgressService playProgressService) {
+    private final DanmakuMaskService danmakuMaskService;
+    public VideoController(VideoService videoService, AuthService authService, PlayProgressService playProgressService,
+                           DanmakuMaskService danmakuMaskService) {
         this.videoService = videoService; this.authService = authService; this.playProgressService = playProgressService;
+        this.danmakuMaskService = danmakuMaskService;
     }
     @Operation(summary = "获取已发布视频列表") @GetMapping public ApiResponse<List<Video>> list()
     {
@@ -176,6 +180,16 @@ public class VideoController {
     }
     @Operation(summary = "获取视频弹幕") @GetMapping("/{id}/danmakus")
     public ApiResponse<List<Danmaku>> danmakus(@PathVariable long id) { return ApiResponse.ok(videoService.danmakus(id)); }
+    @Operation(summary = "获取弹幕防挡脸遮罩", description = "首次请求会触发 FFmpeg 抽帧分析，返回 RUNNING 后前端轮询")
+    @GetMapping("/{id}/danmaku/mask")
+    public ApiResponse<Map<String, Object>> danmakuMask(@PathVariable long id) {
+        return ApiResponse.ok(danmakuMaskService.mask(id));
+    }
+    @Operation(summary = "获取弹幕热度图") @GetMapping("/{id}/danmaku/heatmap")
+    public ApiResponse<Map<String, Object>> danmakuHeatmap(@PathVariable long id,
+                                                           @RequestParam(defaultValue = "10") int bucketSeconds) {
+        return ApiResponse.ok(videoService.danmakuHeatmap(id, bucketSeconds));
+    }
     @Operation(summary = "发送视频弹幕") @PostMapping("/{id}/danmakus")
     public ApiResponse<Void> sendDanmaku(@RequestHeader("Authorization") String authorization, @PathVariable long id,
                                          @Valid @RequestBody DanmakuRequest request) {

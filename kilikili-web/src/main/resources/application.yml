@@ -42,6 +42,8 @@ kilikili:
     poll-interval-ms: ${AI_REVIEW_POLL_INTERVAL_MS:20000}
     initial-delay-ms: ${AI_REVIEW_INITIAL_DELAY_MS:10000}
     auto-publish: ${AI_REVIEW_AUTO_PUBLISH:false}
+    # 弹幕发送时的 DeepSeek 语义审核开关（本地敏感词库始终生效）
+    danmaku-moderation-enabled: ${AI_DANMAKU_MODERATION_ENABLED:true}
   progress:
     enabled: ${PLAY_PROGRESS_ENABLED:true}
     delay-ms: ${PLAY_PROGRESS_DELAY_MS:20000}
@@ -54,6 +56,21 @@ kilikili:
     index: ${SEARCH_INDEX:kilikili_video}
     sync-interval-ms: ${SEARCH_SYNC_INTERVAL_MS:120000}
     initial-delay-ms: ${SEARCH_SYNC_INITIAL_DELAY_MS:8000}
+  # 推荐页缓存治理：穿透空值缓存 / 击穿分布式锁 / 雪崩 TTL 抖动 + 本地 L1 / 延迟双删 / 热点 key 探测
+  cache:
+    recommend-ttl-seconds: ${CACHE_RECOMMEND_TTL_SECONDS:300}
+    ttl-jitter-seconds: ${CACHE_TTL_JITTER_SECONDS:60}
+    null-ttl-seconds: ${CACHE_NULL_TTL_SECONDS:60}
+    local-ttl-ms: ${CACHE_LOCAL_TTL_MS:30000}
+    lock-ttl-ms: ${CACHE_LOCK_TTL_MS:3000}
+    lock-wait-ms: ${CACHE_LOCK_WAIT_MS:60}
+    double-delete-delay-ms: ${CACHE_DOUBLE_DELETE_DELAY_MS:500}
+    category-cache-seconds: ${CACHE_CATEGORY_TTL_SECONDS:300}
+    hot-key-window-ms: ${CACHE_HOT_KEY_WINDOW_MS:10000}
+    hot-key-threshold: ${CACHE_HOT_KEY_THRESHOLD:50}
+    hot-key-extra-ttl-seconds: ${CACHE_HOT_KEY_EXTRA_TTL_SECONDS:300}
+    hot-key-max-size: ${CACHE_HOT_KEY_MAX_SIZE:200}
+    hot-key-flush-interval-ms: ${CACHE_HOT_KEY_FLUSH_INTERVAL_MS:10000}
   live:
     # 主播推流地址前缀，最终地址为 {rtmp-base-url}/{streamKey}
     rtmp-base-url: ${LIVE_RTMP_BASE_URL:rtmp://localhost:1935/live}

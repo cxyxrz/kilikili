@@ -29,6 +29,17 @@ public class DeepSeekClient {
     private final ObjectMapper objectMapper;
     private final ChatClient chatClient;
 
+    /** 弹幕审核专用提示词：弹幕短、口语化，只关注明显违规与广告导流 */
+    private static final String DANMAKU_SYSTEM_PROMPT = """
+            你是中文视频网站的弹幕审核员，负责对单条弹幕做实时内容安全判断。
+            弹幕通常很短、口语化、带网络用语，请重点识别：涉政敏感、色情低俗、暴力血腥、违法犯罪、辱骂攻击、广告导流（联系方式、二维码、站外引流）、危害未成年人。
+            判定标准：
+            - PASS：正常吐槽/互动/玩梗，无风险；
+            - REVIEW：擦边或语义可疑，但不足以直接拒绝；
+            - REJECT：明确违反上述红线或明显广告导流。
+            只输出 JSON，格式为 {"result":"PASS|REVIEW|REJECT","score":0-100,"reason":"20字以内的中文理由","tags":["命中的风险类型"]}。
+            """;
+
     public DeepSeekClient(ObjectMapper objectMapper, ObjectProvider<ChatClient.Builder> chatClientBuilder) {
         this.objectMapper = objectMapper;
         ChatClient.Builder builder = chatClientBuilder.getIfAvailable();
@@ -49,6 +60,23 @@ public class DeepSeekClient {
         }
         if (content == null || content.isBlank()) throw new IllegalStateException("DeepSeek 返回内容为空");
         return parse(content);
+    }
+
+    /** 单条弹幕的实时安全判断，失败由调用方决定是否放行 */
+    public Verdict moderateDanmaku(String danmaku) {
+        if (chatClient == null) throw new IllegalStateException("未配置 DEEPSEEK_API_KEY");
+        String reply;
+        try {
+            reply = chatClient.prompt()
+                    .system(DANMAKU_SYSTEM_PROMPT)
+                    .user("弹幕内容：" + (danmaku == null ? "" : danmaku))
+                    .call()
+                    .content();
+        } catch (Exception e) {
+            throw new IllegalStateException("调用 DeepSeek 失败：" + e.getMessage(), e);
+        }
+        if (reply == null || reply.isBlank()) throw new IllegalStateException("DeepSeek 返回内容为空");
+        return parse(reply);
     }
 
     private String userPrompt(AiReviewSource source) {

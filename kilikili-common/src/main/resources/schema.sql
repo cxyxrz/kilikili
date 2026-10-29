@@ -248,3 +248,52 @@ INSERT IGNORE INTO system_setting(setting_key, setting_value, description) VALUE
   ('coin_enabled', 'true', '投币功能'),
   ('favorite_enabled', 'true', '收藏功能'),
   ('follow_enabled', 'true', '关注功能');
+
+-- 弹幕防挡脸：FFmpeg 抽帧分析任务的执行状态（每个视频一条）
+CREATE TABLE IF NOT EXISTS video_danmaku_analysis (
+  video_id BIGINT PRIMARY KEY,
+  status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+  frame_count INT NOT NULL DEFAULT 0,
+  message VARCHAR(500) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 弹幕防挡脸：按时间段落库的人脸区域，比例均为画面高度的 0~1 归一化值
+CREATE TABLE IF NOT EXISTS video_danmaku_mask (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  video_id BIGINT NOT NULL,
+  start_ms INT NOT NULL,
+  end_ms INT NOT NULL,
+  mask_top DECIMAL(5,4) NOT NULL,
+  mask_bottom DECIMAL(5,4) NOT NULL,
+  face_ratio DECIMAL(5,4) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_danmaku_mask_video_time (video_id, start_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 弹幕关键词过滤词库，action=BLOCK 直接拒绝，REVIEW 放行但记录人工复核日志
+CREATE TABLE IF NOT EXISTS sensitive_word (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  word VARCHAR(64) NOT NULL,
+  action VARCHAR(16) NOT NULL DEFAULT 'BLOCK',
+  enabled TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_sensitive_word (word)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sensitive_word(word, action) VALUES
+  ('加微信', 'BLOCK'),
+  ('加V', 'BLOCK'),
+  ('代开发票', 'BLOCK'),
+  ('裸聊', 'BLOCK'),
+  ('博彩', 'BLOCK'),
+  ('刷单', 'BLOCK'),
+  ('办证', 'BLOCK'),
+  ('毒品', 'BLOCK'),
+  ('枪支', 'BLOCK'),
+  ('赌博', 'BLOCK'),
+  ('上线啦', 'REVIEW'),
+  ('私聊', 'REVIEW'),
+  ('二维码', 'REVIEW'),
+  ('站外链接', 'REVIEW'),
+  ('低价出', 'REVIEW');

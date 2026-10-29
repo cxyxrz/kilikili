@@ -41,6 +41,8 @@ public class VideoService {
     private final TranscodeService transcodeService;
     private final RecommendationService recommendationService;
     private final com.kilikili.web.search.VideoSearchIndexService searchIndexService;
+    private final com.kilikili.web.mapper.DanmakuInsightMapper danmakuInsightMapper;
+    private final DanmakuModerationService danmakuModerationService;
     private final ConcurrentHashMap<String, UploadSession> uploadSessions = new ConcurrentHashMap<>();
 
     private record UploadSession(long userId, String objectKey, String contentType,
@@ -54,7 +56,9 @@ public class VideoService {
     public VideoService(VideoMapper videoMapper, StorageService storageService, NotificationService notificationService,
                         SystemSettingService systemSettingService, TranscodeTaskMapper transcodeTaskMapper,
                         TranscodeService transcodeService, RecommendationService recommendationService,
-                        com.kilikili.web.search.VideoSearchIndexService searchIndexService) {
+                        com.kilikili.web.search.VideoSearchIndexService searchIndexService,
+                        com.kilikili.web.mapper.DanmakuInsightMapper danmakuInsightMapper,
+                        DanmakuModerationService danmakuModerationService) {
         this.videoMapper = videoMapper;
         this.storageService = storageService;
         this.notificationService = notificationService;
@@ -63,6 +67,8 @@ public class VideoService {
         this.transcodeService = transcodeService;
         this.recommendationService = recommendationService;
         this.searchIndexService = searchIndexService;
+        this.danmakuInsightMapper = danmakuInsightMapper;
+        this.danmakuModerationService = danmakuModerationService;
     }
 
     @Transactional
@@ -329,11 +335,51 @@ public class VideoService {
         return videoMapper.listDanmakus(videoId);
     }
 
+    /** 弹幕热度图：按固定秒数分桶聚合，返回每个时间桶的弹幕条数与峰值位置 */
+    public Map<String, Object> danmakuHeatmap(long videoId, int bucketSeconds) {
+        Video video = requireVideo(videoId);
+        int bucket = Math.max(5, Math.min(60, bucketSeconds));
+        long bucketMs = bucket * 1000L;
+        List<com.kilikili.web.entity.DanmakuHeatBucket> rows = danmakuInsightMapper.heatBuckets(videoId, bucketMs);
+        long total = 0L;
+        long maxCount = 0L;
+        long peakBucket = -1L;
+        for (com.kilikili.web.entity.DanmakuHeatBucket row : rows) {
+            total += row.count();
+            if (row.count() > maxCount) {
+                maxCount = row.count();
+                peakBucket = row.bucket();
+            }
+        }
+        long durationMs = video.durationSeconds() == null ? 0L : video.durationSeconds() * 1000L;
+        if (!rows.isEmpty()) {
+            durationMs = Math.max(durationMs, (rows.get(rows.size() - 1).bucket() + 1) * bucketMs);
+        }
+        List<Map<String, Object>> buckets = rows.stream()
+                .map(row -> {
+                    Map<String, Object> item = new java.util.LinkedHashMap<String, Object>();
+                    item.put("startMs", row.bucket() * bucketMs);
+                    item.put("endMs", (row.bucket() + 1) * bucketMs);
+                    item.put("count", row.count());
+                    return item;
+                })
+                .toList();
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("bucketSeconds", bucket);
+        result.put("durationMs", durationMs);
+        result.put("totalCount", total);
+        result.put("maxCount", maxCount);
+        result.put("peakMs", peakBucket < 0 ? 0L : peakBucket * bucketMs);
+        result.put("buckets", buckets);
+        return result;
+    }
+
     @Transactional
     public void sendDanmaku(long userId, long videoId, String content, String mode, String color, int timeMs) {
         systemSettingService.requireEnabled(SystemSettingService.DANMAKU_ENABLED, "弹幕功能已关闭");
         Video video = requireVideo(videoId);
         if (!"PUBLISHED".equals(video.status())) throw new BusinessException("仅已发布视频可以发送弹幕");
+        danmakuModerationService.check(userId, videoId, content.trim());
         videoMapper.insertDanmaku(new Danmaku(null, videoId, userId, content.trim(), mode, color.toUpperCase(), timeMs, null));
         log.info("视频弹幕已发布: userId={}, videoId={}, mode={}, timeMs={}", userId, videoId, mode, timeMs);
     }

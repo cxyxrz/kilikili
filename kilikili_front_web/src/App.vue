@@ -137,7 +137,7 @@ const token = ref(localStorage.getItem("kilikili_token") || "");
 const user = ref<User | null>(
   JSON.parse(localStorage.getItem("kilikili_user") || "null"),
 );
-const activePage = ref<Page>("fans");
+const activePage = ref<Page>("recommend");
 const sidebarCollapsed = ref(false);
 const dark = ref(false);
 const query = ref("");
@@ -154,6 +154,29 @@ const selectedCategory = ref(0);
 const recommendPage = ref(1);
 const recommendLoading = ref(false);
 const hasMore = ref(true);
+// 首页轮播位：取推荐列表前 5 条，6 秒自动切换
+const heroIndex = ref(0);
+const heroVideos = computed(() => videos.value.slice(0, 5));
+function heroNext() {
+  if (!heroVideos.value.length) return;
+  heroIndex.value = (heroIndex.value + 1) % heroVideos.value.length;
+}
+function heroPrev() {
+  if (!heroVideos.value.length) return;
+  heroIndex.value = (heroIndex.value - 1 + heroVideos.value.length) % heroVideos.value.length;
+}
+// 换一换：把首条挪到末尾，轮播同步回到第一条，不额外请求接口
+function rotateFeed() {
+  if (videos.value.length < 2) return;
+  const first = videos.value.shift();
+  if (first) videos.value.push(first);
+  heroIndex.value = 0;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function categoryName(categoryId?: number | null) {
+  if (!categoryId) return "";
+  return categories.value.find((item) => item.id === categoryId)?.name || "";
+}
 const creatorTab = ref<"manage" | "upload" | "stats">("manage");
 const creatorVideos = ref<CreatorVideo[]>([]);
 const creatorKeyword = ref("");
@@ -255,6 +278,19 @@ const danmaku = ref("");
 const danmakuMode = ref<Danmaku["mode"]>("SCROLL");
 const danmakuColor = ref("#FFFFFF");
 const danmakus = ref<Danmaku[]>([]);
+// 弹幕防挡脸：后端抽帧检测出的人脸时间片段；热度图：按时间桶聚合的弹幕条数
+type DanmakuMaskSegment = { startMs: number; endMs: number; maskTop: number; maskBottom: number; faceRatio: number };
+type DanmakuHeatBucket = { startMs: number; endMs: number; count: number };
+const danmakuMaskSegments = ref<DanmakuMaskSegment[]>([]);
+const danmakuMaskStatus = ref("NONE");
+const danmakuHeat = ref<{
+  bucketSeconds: number;
+  durationMs: number;
+  totalCount: number;
+  maxCount: number;
+  peakMs: number;
+  buckets: DanmakuHeatBucket[];
+}>({ bucketSeconds: 10, durationMs: 0, totalCount: 0, maxCount: 0, peakMs: 0, buckets: [] });
 const profile = ref<Profile>({
   id: 0,
   username: "",
@@ -301,6 +337,8 @@ const volume = ref(1);
 const muted = ref(false);
 const playbackRate = ref(1);
 const danmakuOn = ref(true);
+// 防挡脸开关：开启后弹幕轨道自动避开人脸区域
+const faceMaskOn = ref(true);
 const danmakuSettingsOpen = ref(false);
 const rateMenuOpen = ref(false);
 const stageRef = ref<HTMLElement | null>(null);
@@ -367,6 +405,7 @@ function onTimeUpdate() {
 
 // 播放进度：每 15 秒上报一次，后端先写 Redis，再由延迟任务合并落库
 let progressPoll = 0;
+let heroTimer = 0;
 function reportPlayProgress() {
   const player = videoPlayer.value;
   if (!loggedIn.value || !selected.value || !player || player.paused) return;
@@ -610,6 +649,7 @@ async function loadVideos(reset = true) {
     videos.value = reset ? data.items : [...videos.value, ...data.items];
     recommendPage.value = page;
     hasMore.value = data.hasMore;
+    if (reset) heroIndex.value = 0;
   } catch (error) {
     fail(error);
   } finally {
@@ -688,11 +728,6 @@ function readSearchHistory(): string[] {
 }
 function hideSuggestSoon() {
   window.setTimeout(() => (suggestVisible.value = false), 160);
-}
-function scheduleSearch() {
-  activePage.value = "search";
-  window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(loadSearchResults, 260);
 }
 function selectCategory(categoryId: number) {
   selectedCategory.value = categoryId;
@@ -1315,6 +1350,51 @@ async function loadDanmakus(videoId: number) {
     fail(error);
   }
 }
+// 后端首次请求会触发 FFmpeg 抽帧分析，RUNNING 期间短轮询直到拿到遮罩
+async function loadDanmakuMask(videoId: number, attempt = 0) {
+  try {
+    const data = (await axios.get(`/api/videos/${videoId}/danmaku/mask`)).data.data;
+    if (selected.value?.id !== videoId) return;
+    danmakuMaskStatus.value = data.status;
+    danmakuMaskSegments.value = data.segments ?? [];
+    const pending = data.status === "RUNNING" || data.status === "PENDING";
+    if (pending && attempt < 20 && selected.value?.id === videoId) {
+      window.setTimeout(() => loadDanmakuMask(videoId, attempt + 1), 3000);
+    }
+  } catch {
+    danmakuMaskStatus.value = "FAILED";
+    danmakuMaskSegments.value = [];
+  }
+}
+async function loadDanmakuHeatmap(videoId: number) {
+  try {
+    const data = (await axios.get(`/api/videos/${videoId}/danmaku/heatmap`, { params: { bucketSeconds: 10 } })).data.data;
+    if (selected.value?.id !== videoId) return;
+    danmakuHeat.value = data;
+  } catch {
+    danmakuHeat.value = { bucketSeconds: 10, durationMs: 0, totalCount: 0, maxCount: 0, peakMs: 0, buckets: [] };
+  }
+}
+// 取当前播放时间命中的人脸区域（0~1 比例），没有命中的片段返回 null
+function currentMaskSegment(timeMs: number): DanmakuMaskSegment | null {
+  if (!faceMaskOn.value) return null;
+  for (const segment of danmakuMaskSegments.value) {
+    if (timeMs >= segment.startMs && timeMs < segment.endMs) return segment;
+  }
+  return null;
+}
+function heatLeft(bucket: { startMs: number }, durationMs: number) {
+  if (!durationMs) return 0;
+  return Math.max(0, Math.min(100, (bucket.startMs / durationMs) * 100));
+}
+function heatWidth(bucket: { startMs: number; endMs: number }, durationMs: number) {
+  if (!durationMs) return 0;
+  return Math.max(0.4, Math.min(100, ((bucket.endMs - bucket.startMs) / durationMs) * 100));
+}
+function heatHeight(count: number, maxCount: number) {
+  if (!maxCount) return 8;
+  return Math.max(8, Math.round((count / maxCount) * 100));
+}
 function stopDanmakuRender() {
   if (danmakuFrame) cancelAnimationFrame(danmakuFrame);
   danmakuFrame = 0;
@@ -1352,6 +1432,26 @@ function renderDanmakus() {
   const fontSize = Math.max(16, Math.min(24, width / 48));
   const lineHeight = fontSize + 10;
   const laneCount = Math.max(1, Math.floor((height * 0.62) / lineHeight));
+  // 防挡脸：命中人脸片段时，把落在遮罩带内的轨道剔除，弹幕只在剩余轨道里分配
+  const maskSegment = currentMaskSegment(timeMs);
+  const maskTop = maskSegment ? maskSegment.maskTop * height - lineHeight * 0.55 : -1;
+  const maskBottom = maskSegment ? maskSegment.maskBottom * height + lineHeight * 0.55 : -1;
+  const topLanes: number[] = [];
+  const bottomLanes: number[] = [];
+  for (let lane = 0; lane < laneCount; lane++) {
+    const topY = lineHeight / 2 + lane * lineHeight;
+    if (!maskSegment || topY < maskTop || topY > maskBottom) topLanes.push(topY);
+    const bottomY = height - lineHeight / 2 - lane * lineHeight;
+    if (!maskSegment || bottomY < maskTop || bottomY > maskBottom) bottomLanes.push(bottomY);
+  }
+  // 人脸区域吃掉大部分上部轨道时，把滚动/顶部弹幕扩展到画面下方，避免全部挤在一条线上
+  if (maskSegment && topLanes.length < 2) {
+    const extendedLanes = Math.max(laneCount, Math.floor((height * 0.86) / lineHeight));
+    for (let lane = laneCount; lane < extendedLanes; lane++) {
+      const topY = lineHeight / 2 + lane * lineHeight;
+      if (topY < maskTop || topY > maskBottom) topLanes.push(topY);
+    }
+  }
   context.font = `600 ${fontSize}px Microsoft YaHei, sans-serif`;
   context.textBaseline = "middle";
   danmakus.value.forEach((item) => {
@@ -1359,14 +1459,15 @@ function renderDanmakus() {
     const visibleFor = item.mode === "SCROLL" ? 8000 : 4200;
     if (elapsed < 0 || elapsed > visibleFor) return;
     const textWidth = context.measureText(item.content).width;
-    const lane = item.id % laneCount;
+    const lanes = item.mode === "BOTTOM" ? bottomLanes : topLanes;
+    const y = lanes.length
+      ? lanes[item.id % lanes.length]
+      : lineHeight / 2 + (item.id % laneCount) * lineHeight;
     let x = 0;
-    let y = lineHeight / 2 + lane * lineHeight;
     if (item.mode === "SCROLL") {
       x = width - ((width + textWidth) * elapsed) / visibleFor;
     } else {
       x = (width - textWidth) / 2;
-      if (item.mode === "BOTTOM") y = height - lineHeight / 2 - lane * lineHeight;
     }
     context.lineWidth = 3;
     context.strokeStyle = "rgba(0, 0, 0, .58)";
@@ -1393,6 +1494,7 @@ async function sendDanmaku() {
     }, { headers: authHeaders() });
     danmaku.value = "";
     await loadDanmakus(selected.value.id);
+    await loadDanmakuHeatmap(selected.value.id);
     notice.value = "弹幕发送成功";
   } catch (error) {
     fail(error);
@@ -1597,6 +1699,9 @@ async function openVideo(video: Video) {
     qualityMenuOpen.value = false;
     rateMenuOpen.value = false;
     danmakuSettingsOpen.value = false;
+    danmakuMaskSegments.value = [];
+    danmakuMaskStatus.value = "NONE";
+    danmakuHeat.value = { bucketSeconds: 10, durationMs: 0, totalCount: 0, maxCount: 0, peakMs: 0, buckets: [] };
     // 先用后端返回的转码档位渲染清晰度菜单，hls.js 解析完成后再用它校正
     serverHeights.value = response.playUrl?.includes(".m3u8") ? renditionHeights(response.transcode?.renditions ?? []) : [];
     qualityLevels.value = serverHeights.value.map((height) => ({ height, label: qualityLabel(height) }));
@@ -1611,6 +1716,9 @@ async function openVideo(video: Video) {
       await axios.get(`/api/videos/${video.id}/comments`)
     ).data.data;
     await loadDanmakus(video.id);
+    // 遮罩首次查询会触发后端抽帧分析，不阻塞播放器启动
+    loadDanmakuMask(video.id);
+    await loadDanmakuHeatmap(video.id);
     await nextTick();
     attachVideoSource();
     startDanmakuRender();
@@ -1969,6 +2077,10 @@ onMounted(() => {
   loadVideos();
   loadHotKeywords();
   progressPoll = window.setInterval(reportPlayProgress, 15000);
+  // 首页轮播自动切换；停留其他页面时不做无意义的重渲染判断
+  heroTimer = window.setInterval(() => {
+    if (activePage.value === "recommend" && heroVideos.value.length > 1) heroNext();
+  }, 6000);
   if (loggedIn.value) {
     loadProfile();
     loadUnreadNotificationCount();
@@ -1983,6 +2095,7 @@ onBeforeUnmount(() => {
   closeLiveRoomSocket();
   destroyLiveHls();
   window.clearInterval(progressPoll);
+  window.clearInterval(heroTimer);
 });
 </script>
 
@@ -2073,37 +2186,7 @@ onBeforeUnmount(() => {
           @click="sidebarCollapsed = !sidebarCollapsed"
         >
           ☰</button
-        ><div class="search-wrap">
-          <label class="search-box"
-            ><span>⌕</span
-            ><input
-              v-model="query"
-              placeholder="搜索视频、UP主..."
-              @focus="
-                navigate('search');
-                suggestVisible = true;
-              "
-              @input="
-                scheduleSearch();
-                scheduleSuggest();
-                suggestVisible = true;
-              "
-              @keyup.enter="submitSearch(query)"
-              @blur="hideSuggestSoon"
-            /><span class="mic">♩</span></label
-          >
-          <div v-if="suggestVisible && suggestions.length" class="search-suggest">
-            <button
-              v-for="item in suggestions"
-              :key="item"
-              type="button"
-              @mousedown.prevent="submitSearch(item)"
-            >
-              <span class="suggest-icon">⌕</span>{{ item }}
-            </button>
-          </div>
-        </div>
-        <div class="top-actions">
+        ><div class="top-actions">
           <button title="切换主题" @click="dark = !dark">☾</button
           ><button class="bell" title="通知" @click="navigate('message')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2140,6 +2223,26 @@ onBeforeUnmount(() => {
                   <canvas ref="danmakuCanvas" class="danmaku-canvas"></canvas>
                   <div class="player-bar">
                     <div
+                      v-if="danmakuHeat.buckets.length"
+                      class="player-heatmap"
+                      :title="`弹幕热度：共 ${danmakuHeat.totalCount} 条，峰值 ${formatClock(danmakuHeat.peakMs / 1000)}`"
+                    >
+                      <span
+                        v-for="bucket in danmakuHeat.buckets"
+                        :key="bucket.startMs"
+                        :style="{
+                          left: heatLeft(bucket, danmakuHeat.durationMs) + '%',
+                          width: heatWidth(bucket, danmakuHeat.durationMs) + '%',
+                          height: heatHeight(bucket.count, danmakuHeat.maxCount) + '%',
+                        }"
+                      ></span>
+                      <i
+                        v-if="danmakuHeat.peakMs"
+                        class="player-heatmap-peak"
+                        :style="{ left: heatLeft({ startMs: danmakuHeat.peakMs }, danmakuHeat.durationMs) + '%' }"
+                      ></i>
+                    </div>
+                    <div
                       class="player-progress"
                       @pointerdown="startSeek"
                       @pointermove="moveSeek"
@@ -2159,6 +2262,11 @@ onBeforeUnmount(() => {
                             <button :class="{ active: danmakuMode === 'SCROLL' }" @click="danmakuMode = 'SCROLL'">滚动</button>
                             <button :class="{ active: danmakuMode === 'TOP' }" @click="danmakuMode = 'TOP'">顶部</button>
                             <button :class="{ active: danmakuMode === 'BOTTOM' }" @click="danmakuMode = 'BOTTOM'">底部</button>
+                            <button
+                              :class="{ active: faceMaskOn }"
+                              :title="danmakuMaskStatus === 'RUNNING' ? '正在分析人脸区域…' : '弹幕自动避开人脸区域'"
+                              @click="faceMaskOn = !faceMaskOn"
+                            >防挡脸{{ danmakuMaskStatus === "RUNNING" ? "…" : "" }}</button>
                             <label class="danmaku-color" title="自定义颜色"><input v-model="danmakuColor" type="color" aria-label="弹幕颜色"></label>
                           </div>
                         </div>
@@ -3044,65 +3152,140 @@ onBeforeUnmount(() => {
                 输入视频标题或 UP 主昵称开始搜索
               </p>
             </div>
-            <div v-if="activePage === 'recommend'" class="category-bar">
-              <button
-                :class="{ active: selectedCategory === 0 }"
-                @click="selectCategory(0)"
-              >
-                全部</button
-              ><button
-                v-for="category in categories"
-                :key="category.id"
-                :class="{ active: selectedCategory === category.id }"
-                @click="selectCategory(category.id)"
-              >
-                {{ category.name }}</button
-              ><button class="more-category">⌄ 更多</button>
+            <div v-if="activePage === 'recommend'" class="home-feed">
+              <div class="search-wrap home-search">
+                <label class="search-box"
+                  ><span>⌕</span
+                  ><input
+                    v-model="query"
+                    placeholder="搜索视频、UP主..."
+                    @focus="suggestVisible = true"
+                    @input="
+                      scheduleSuggest();
+                      suggestVisible = true;
+                    "
+                    @keyup.enter="submitSearch(query)"
+                    @blur="hideSuggestSoon"
+                  /></label
+                >
+                <div v-if="suggestVisible && suggestions.length" class="search-suggest">
+                  <button
+                    v-for="item in suggestions"
+                    :key="item"
+                    type="button"
+                    @mousedown.prevent="submitSearch(item)"
+                  >
+                    <span class="suggest-icon">⌕</span>{{ item }}
+                  </button>
+                </div>
+              </div>
+              <section v-if="heroVideos.length" class="home-hero">
+                <article
+                  v-for="(item, index) in heroVideos"
+                  :key="item.id"
+                  class="home-hero-slide"
+                  :class="{ active: index === heroIndex }"
+                  @click="openVideo(item)"
+                >
+                  <img v-if="item.coverUrl" :src="item.coverUrl" :alt="item.title" />
+                  <div class="home-hero-shade"></div>
+                  <div class="home-hero-info">
+                    <span class="home-hero-badge">精选推荐</span>
+                    <h2>{{ item.title }}</h2>
+                    <p>
+                      <span class="mini-avatar">{{ item.authorName.slice(0, 1) }}</span>
+                      {{ item.authorName }}<i>·</i>{{ formatCount(item.viewCount) }} 播放
+                    </p>
+                  </div>
+                </article>
+                <button class="home-hero-arrow prev" aria-label="上一个" @click.stop="heroPrev">‹</button>
+                <button class="home-hero-arrow next" aria-label="下一个" @click.stop="heroNext">›</button>
+                <div class="home-hero-dots">
+                  <button
+                    v-for="(item, index) in heroVideos"
+                    :key="item.id"
+                    :class="{ active: index === heroIndex }"
+                    :aria-label="`第 ${index + 1} 个推荐`"
+                    @click.stop="heroIndex = index"
+                  ></button>
+                </div>
+              </section>
+              <section class="home-channels">
+                <div class="home-channel-grid">
+                  <button class="home-channel" :class="{ active: selectedCategory === 0 }" @click="selectCategory(0)">
+                    <span class="channel-icon hot">热</span><b>热门</b>
+                  </button>
+                  <button
+                    v-for="category in categories"
+                    :key="category.id"
+                    class="home-channel"
+                    :class="{ active: selectedCategory === category.id }"
+                    @click="selectCategory(category.id)"
+                  >
+                    <span class="channel-icon">{{ category.name.slice(0, 1) }}</span><b>{{ category.name }}</b>
+                  </button>
+                </div>
+                <div class="home-channel-links">
+                  <button @click="navigate('live')">直播</button>
+                  <button @click="navigate('create')">投稿</button>
+                  <button @click="navigate('history')">历史</button>
+                  <button @click="navigate('favorite')">收藏</button>
+                </div>
+              </section>
             </div>
-            <section v-if="!query.trim() || displayedVideos.length" class="video-grid">
+            <section
+              v-if="displayedVideos.length"
+              class="home-video-grid"
+              :class="{ 'search-grid': activePage === 'search' }"
+            >
               <article
-                v-for="video in displayedVideos"
+                v-for="(video, index) in displayedVideos"
                 :key="video.id"
-                class="video-card"
+                class="home-card"
+                :class="{ featured: activePage === 'recommend' && index === 0 }"
                 @click="openVideo(video)"
               >
-                <div class="video-cover">
-                  <img
-                    v-if="video.coverUrl"
-                    :src="video.coverUrl"
-                    :alt="video.title"
-                  /><span v-else>▶</span
-                  ><em>{{ formatDuration(video.durationSeconds) }}</em>
+                <div class="home-card-cover">
+                  <img v-if="video.coverUrl" :src="video.coverUrl" :alt="video.title" />
+                  <span v-else class="home-card-placeholder">▶</span>
+                  <div class="home-card-stats">
+                    <span>▶ {{ formatCount(video.viewCount) }}</span>
+                    <span>◍ {{ formatCount(video.commentCount) }}</span>
+                  </div>
+                  <em class="home-card-duration">{{ formatDuration(video.durationSeconds) }}</em>
                 </div>
-                <h3>{{ video.title }}</h3>
-                <p>
-                  <span class="mini-avatar">{{
-                    video.authorName.slice(0, 1)
-                  }}</span
-                  >{{ video.authorName }}
-                </p>
-                <small
-                  >◉ {{ formatCount(video.viewCount) }}　▣
-                  {{ formatCount(video.commentCount) }}</small
-                >
+                <div class="home-card-body">
+                  <h3 :title="video.title">{{ video.title }}</h3>
+                  <p class="home-card-meta">
+                    <span class="mini-avatar">{{ video.authorName.slice(0, 1) }}</span>
+                    <span class="home-card-author">{{ video.authorName }}</span>
+                    <span v-if="categoryName(video.categoryId)" class="home-card-tag">{{ categoryName(video.categoryId) }}</span>
+                  </p>
+                </div>
               </article>
-              <p
-                v-if="query.trim() && !displayedVideos.length && !(activePage === 'recommend' ? recommendLoading : searchLoading)"
-                class="empty"
-              >
-                {{ activePage === 'search' ? '没有找到匹配的视频，试试其他关键词' : '暂时没有匹配的视频' }}
-              </p>
             </section>
+            <p
+              v-if="!displayedVideos.length && !(activePage === 'recommend' ? recommendLoading : searchLoading)"
+              class="empty"
+            >
+              {{ activePage === 'search' ? '没有找到匹配的视频，试试其他关键词' : '暂时没有匹配的视频' }}
+            </p>
             <p v-if="activePage === 'recommend' && recommendLoading" class="load-status">正在加载推荐内容…</p>
             <p v-if="activePage === 'search' && searchLoading" class="load-status">正在搜索…</p>
             <p
-              v-else-if="
-                activePage === 'recommend' && !hasMore && videos.length
-              "
+              v-else-if="activePage === 'recommend' && !hasMore && videos.length"
               class="load-status"
             >
               已经到底啦
-            </p></template
+            </p>
+            <button
+              v-if="activePage === 'recommend' && videos.length > 1"
+              class="home-refresh"
+              title="换一换"
+              @click="rotateFeed"
+            >
+              <span>↻</span>换一换
+            </button></template
           >
           <section v-else-if="activePage === 'message' && loggedIn" class="notification-page">
             <header class="notification-header">
