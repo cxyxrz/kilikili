@@ -42,6 +42,7 @@ type FollowingUser = {
   followedAt: string;
 };
 type Category = { id: number; name: string };
+type HotKeyword = { keyword: string; score: number; rank: number };
 type SpaceUser = {
   id: number;
   nickname: string;
@@ -89,9 +90,39 @@ type Profile = {
   birthday: string | null;
   bio: string | null;
 };
+type LiveRoom = {
+  id: number;
+  userId: number;
+  title: string;
+  status: "READY" | "LIVING" | "ENDED";
+  coverUrl?: string | null;
+  authorName: string;
+  authorAvatar?: string | null;
+  viewerCount: number;
+  danmakuCount: number;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  createdAt?: string;
+  playUrl?: string | null;
+  streamKey?: string;
+  pushUrl?: string;
+  hlsUrl?: string;
+};
+type LiveMessage = {
+  id: number;
+  roomId: number;
+  userId?: number | null;
+  type: string;
+  content: string;
+  createdAt?: string;
+  nickname: string;
+  avatar?: string | null;
+};
 type Page =
   | "recommend"
   | "search"
+  | "live"
+  | "liveRoom"
   | "create"
   | "history"
   | "favorite"
@@ -113,6 +144,11 @@ const query = ref("");
 const videos = ref<Video[]>([]);
 const searchResults = ref<Video[]>([]);
 const searchLoading = ref(false);
+// 搜索联想、热搜榜与本地搜索历史
+const suggestions = ref<string[]>([]);
+const suggestVisible = ref(false);
+const hotKeywords = ref<HotKeyword[]>([]);
+const searchHistory = ref<string[]>(readSearchHistory());
 const categories = ref<Category[]>([]);
 const selectedCategory = ref(0);
 const recommendPage = ref(1);
@@ -237,6 +273,8 @@ const videoPlayer = ref<HTMLVideoElement | null>(null);
 const danmakuCanvas = ref<HTMLCanvasElement | null>(null);
 let danmakuFrame = 0;
 let searchTimer = 0;
+let suggestTimer = 0;
+const SEARCH_HISTORY_KEY = "kilikili:search:history";
 // WebSocket 实时通知：连接句柄、重连定时器、心跳定时器
 let realtimeSocket: WebSocket | null = null;
 let realtimeReconnectTimer = 0;
@@ -266,6 +304,30 @@ const danmakuOn = ref(true);
 const danmakuSettingsOpen = ref(false);
 const rateMenuOpen = ref(false);
 const stageRef = ref<HTMLElement | null>(null);
+
+// 直播：房间列表、开播台与直播间弹幕
+const liveRooms = ref<LiveRoom[]>([]);
+const liveLoading = ref(false);
+const liveMineRoom = ref<LiveRoom | null>(null);
+const liveTitle = ref("");
+const liveCover = ref<File | null>(null);
+const liveCoverPreview = ref("");
+const liveCreating = ref(false);
+const liveCopied = ref(false);
+const liveCurrent = ref<LiveRoom | null>(null);
+const liveMessages = ref<LiveMessage[]>([]);
+const liveInput = ref("");
+const liveViewerCount = ref(0);
+const liveStatusTip = ref("");
+const liveRoomLoading = ref(false);
+const livePlayer = ref<HTMLVideoElement | null>(null);
+const liveMessageList = ref<HTMLElement | null>(null);
+const liveStudioRef = ref<HTMLElement | null>(null);
+let liveSocket: WebSocket | null = null;
+let liveReconnectTimer = 0;
+let liveHeartbeatTimer = 0;
+let liveSocketRetry = 0;
+let liveHls: Hls | null = null;
 
 const progressPercent = computed(() =>
   duration.value > 0 ? Math.min(100, (currentTime.value / duration.value) * 100) : 0
@@ -472,6 +534,7 @@ function switchQuality(height: number | null) {
 
 const navItems: { key: Page; label: string; icon: string }[] = [
   { key: "recommend", label: "推荐", icon: "▣" },
+  { key: "live", label: "直播", icon: "◉" },
   { key: "search", label: "搜索", icon: "⌕" },
   { key: "create", label: "创作中心", icon: "□" },
   { key: "history", label: "历史记录", icon: "◷" },
@@ -484,6 +547,8 @@ const navItems: { key: Page; label: string; icon: string }[] = [
 ];
 const pageTitle: Record<Page, string> = {
   recommend: "推荐视频",
+  live: "直播广场",
+  liveRoom: "直播间",
   search: "搜索结果",
   create: "创作中心",
   history: "观看历史",
@@ -562,11 +627,67 @@ async function loadSearchResults() {
     searchResults.value = (await axios.get("/api/search", {
       params: { keyword, page: 1, pageSize: 40 },
     })).data.data.items;
+    rememberSearch(keyword);
+    loadHotKeywords();
   } catch (error) {
     fail(error);
   } finally {
     searchLoading.value = false;
   }
+}
+// 搜索联想：输入停顿 200ms 后请求，避免每次按键都打后端
+function scheduleSuggest() {
+  window.clearTimeout(suggestTimer);
+  const keyword = query.value.trim();
+  if (!keyword) {
+    suggestions.value = [];
+    return;
+  }
+  suggestTimer = window.setTimeout(async () => {
+    try {
+      suggestions.value = (await axios.get("/api/search/suggest", { params: { keyword } })).data.data;
+    } catch {
+      suggestions.value = [];
+    }
+  }, 200);
+}
+async function loadHotKeywords() {
+  try {
+    hotKeywords.value = (await axios.get("/api/search/hot")).data.data;
+  } catch {
+    hotKeywords.value = [];
+  }
+}
+function submitSearch(keyword: string) {
+  const value = keyword.trim();
+  if (!value) return;
+  query.value = value;
+  suggestions.value = [];
+  suggestVisible.value = false;
+  activePage.value = "search";
+  window.clearTimeout(searchTimer);
+  loadSearchResults();
+}
+function clearSearchHistory() {
+  searchHistory.value = [];
+  localStorage.removeItem(SEARCH_HISTORY_KEY);
+}
+function rememberSearch(keyword: string) {
+  const next = [keyword, ...searchHistory.value.filter((item) => item !== keyword)].slice(0, 10);
+  searchHistory.value = next;
+  localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+}
+function readSearchHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string").slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+function hideSuggestSoon() {
+  window.setTimeout(() => (suggestVisible.value = false), 160);
 }
 function scheduleSearch() {
   activePage.value = "search";
@@ -1324,6 +1445,15 @@ function selectCoverFile(file: File | null | undefined) {
 function navigate(page: Page) {
   activePage.value = page;
   selected.value = null;
+  // 离开直播间时释放弹幕连接与 HLS 播放器，避免后台占用
+  if (page !== "liveRoom") {
+    closeLiveRoomSocket();
+    destroyLiveHls();
+  }
+  if (page === "live") {
+    loadLiveRooms();
+    loadLiveMine();
+  }
   if (
     (page === "create" || page === "settings" || page === "history" || page === "favorite" || page === "message" || page === "chat" || page === "fans" || page === "following") &&
     !loggedIn.value
@@ -1555,9 +1685,289 @@ async function sendReply() {
     fail(error);
   }
 }
+const liveStatusLabel = (status?: string) =>
+  status === "LIVING" ? "直播中" : status === "READY" ? "待开播" : status === "ENDED" ? "已结束" : "";
+
+function scrollToLiveStudio() {
+  liveStudioRef.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function loadLiveRooms() {
+  liveLoading.value = true;
+  try {
+    liveRooms.value = (await axios.get("/api/live/rooms")).data.data;
+  } catch (error) {
+    fail(error);
+  } finally {
+    liveLoading.value = false;
+  }
+}
+
+async function loadLiveMine() {
+  if (!loggedIn.value) {
+    liveMineRoom.value = null;
+    return;
+  }
+  try {
+    const data = (await axios.get("/api/live/rooms/mine", { headers: authHeaders() })).data.data;
+    liveMineRoom.value = data.room || null;
+    if (liveMineRoom.value && !liveTitle.value) liveTitle.value = liveMineRoom.value.title;
+  } catch (error) {
+    fail(error);
+  }
+}
+
+function selectLiveCover(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    notice.value = "封面仅支持图片文件";
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    notice.value = "封面图片不能超过 5MB";
+    return;
+  }
+  if (liveCoverPreview.value) URL.revokeObjectURL(liveCoverPreview.value);
+  liveCover.value = file;
+  liveCoverPreview.value = URL.createObjectURL(file);
+}
+
+async function submitLiveRoom() {
+  if (!loggedIn.value) return openAuth();
+  if (!liveTitle.value.trim()) {
+    notice.value = "请填写直播标题";
+    return;
+  }
+  liveCreating.value = true;
+  try {
+    const form = new FormData();
+    form.append("title", liveTitle.value.trim());
+    if (liveCover.value) form.append("cover", liveCover.value);
+    const data = (await axios.post("/api/live/rooms", form, {
+      headers: { ...authHeaders(), "Content-Type": "multipart/form-data" },
+    })).data.data;
+    liveMineRoom.value = data.room;
+    liveCover.value = null;
+    if (liveCoverPreview.value) {
+      URL.revokeObjectURL(liveCoverPreview.value);
+      liveCoverPreview.value = "";
+    }
+    notice.value = "直播间已就绪，按下方地址推流即可开播";
+    await loadLiveRooms();
+  } catch (error) {
+    fail(error);
+  } finally {
+    liveCreating.value = false;
+  }
+}
+
+async function copyLivePushUrl() {
+  const url = liveMineRoom.value?.pushUrl;
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    liveCopied.value = true;
+    window.setTimeout(() => (liveCopied.value = false), 1800);
+  } catch {
+    notice.value = `推流地址：${url}`;
+  }
+}
+
+async function refreshLiveMine() {
+  await loadLiveMine();
+  await loadLiveRooms();
+  notice.value = "直播间状态已刷新";
+}
+
+async function startLiveRoom() {
+  const roomId = liveMineRoom.value?.id;
+  if (!roomId) return;
+  try {
+    const data = (await axios.post(`/api/live/rooms/${roomId}/start`, {}, { headers: authHeaders() })).data.data;
+    liveMineRoom.value = data.room;
+    notice.value = "已标记为直播中，可以开始推流了";
+    await loadLiveRooms();
+  } catch (error) {
+    fail(error);
+  }
+}
+
+async function stopLiveRoom() {
+  const roomId = liveCurrent.value?.id ?? liveMineRoom.value?.id;
+  if (!roomId) return;
+  try {
+    const data = (await axios.post(`/api/live/rooms/${roomId}/stop`, {}, { headers: authHeaders() })).data.data;
+    if (liveMineRoom.value && liveMineRoom.value.id === roomId) liveMineRoom.value = data.room;
+    if (liveCurrent.value && liveCurrent.value.id === roomId) {
+      liveCurrent.value = { ...data.room, playUrl: null };
+      destroyLiveHls();
+      liveStatusTip.value = "直播已结束";
+    }
+    notice.value = "已下播";
+    await loadLiveRooms();
+  } catch (error) {
+    fail(error);
+  }
+}
+
+async function openLiveRoom(roomId: number) {
+  closeLiveRoomSocket();
+  destroyLiveHls();
+  activePage.value = "liveRoom";
+  selected.value = null;
+  liveRoomLoading.value = true;
+  liveStatusTip.value = "";
+  liveMessages.value = [];
+  try {
+    const data = (await axios.get(`/api/live/rooms/${roomId}`, { headers: authHeaders() })).data.data;
+    liveCurrent.value = data.room;
+    liveMessages.value = data.messages || [];
+    liveViewerCount.value = data.room?.viewerCount || 0;
+    connectLiveSocket(roomId);
+    await nextTick();
+    attachLiveHls();
+    scrollLiveMessages();
+  } catch (error) {
+    fail(error);
+  } finally {
+    liveRoomLoading.value = false;
+  }
+}
+
+function destroyLiveHls() {
+  if (liveHls) {
+    liveHls.destroy();
+    liveHls = null;
+  }
+}
+
+// 直播流交给 hls.js；Safari 原生支持 HLS 时直接使用 video 标签
+function attachLiveHls() {
+  const el = livePlayer.value;
+  const url = liveCurrent.value?.playUrl;
+  if (!el || !url) return;
+  if (Hls.isSupported()) {
+    liveHls = new Hls({ liveDurationInfinity: true, lowLatencyMode: true });
+    liveHls.loadSource(url);
+    liveHls.attachMedia(el);
+    liveHls.on(Hls.Events.ERROR, (_event, data) => {
+      if (!data.fatal) return;
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) liveHls?.startLoad();
+      else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) liveHls?.recoverMediaError();
+    });
+  } else {
+    el.src = url;
+  }
+}
+
+function liveSocketUrl(roomId: number) {
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.host}/ws/live?roomId=${roomId}`;
+}
+
+function connectLiveSocket(roomId: number) {
+  closeLiveRoomSocket();
+  const socket = new WebSocket(liveSocketUrl(roomId));
+  liveSocket = socket;
+  socket.onopen = () => {
+    liveSocketRetry = 0;
+    window.clearInterval(liveHeartbeatTimer);
+    liveHeartbeatTimer = window.setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) socket.send("ping");
+    }, 25000);
+  };
+  socket.onmessage = (event) => {
+    if (event.data === "pong") return;
+    try {
+      handleLiveEvent(JSON.parse(event.data));
+    } catch {
+      // 忽略无法解析的推送内容
+    }
+  };
+  socket.onclose = () => {
+    window.clearInterval(liveHeartbeatTimer);
+    liveHeartbeatTimer = 0;
+    if (liveSocket === socket) liveSocket = null;
+    if (activePage.value === "liveRoom" && liveCurrent.value?.id === roomId) scheduleLiveReconnect(roomId);
+  };
+  socket.onerror = () => socket.close();
+}
+
+function scheduleLiveReconnect(roomId: number) {
+  if (liveReconnectTimer) return;
+  const delay = Math.min(15000, 1000 * 2 ** liveSocketRetry);
+  liveSocketRetry = Math.min(liveSocketRetry + 1, 4);
+  liveReconnectTimer = window.setTimeout(() => {
+    liveReconnectTimer = 0;
+    if (activePage.value === "liveRoom" && liveCurrent.value?.id === roomId) connectLiveSocket(roomId);
+  }, delay);
+}
+
+function closeLiveRoomSocket() {
+  window.clearTimeout(liveReconnectTimer);
+  liveReconnectTimer = 0;
+  window.clearInterval(liveHeartbeatTimer);
+  liveHeartbeatTimer = 0;
+  liveSocketRetry = 0;
+  if (liveSocket) {
+    const socket = liveSocket;
+    liveSocket = null;
+    socket.onclose = null;
+    socket.close();
+  }
+}
+
+function handleLiveEvent(event: any) {
+  if (event.kind === "CONNECTED" || event.kind === "LIVE_VIEWER") {
+    if (typeof event.viewerCount === "number") liveViewerCount.value = event.viewerCount;
+    return;
+  }
+  if (event.kind === "LIVE_DANMAKU" && event.message) {
+    liveMessages.value = [...liveMessages.value.slice(-199), event.message];
+    if (liveCurrent.value) liveCurrent.value.danmakuCount = (liveCurrent.value.danmakuCount || 0) + 1;
+    scrollLiveMessages();
+    return;
+  }
+  if (event.kind === "LIVE_STATUS" && liveCurrent.value && event.roomId === liveCurrent.value.id) {
+    liveCurrent.value.status = event.status;
+    if (event.status === "LIVING" && !liveCurrent.value.playUrl) {
+      liveCurrent.value.playUrl = `/api/live/rooms/${liveCurrent.value.id}/hls/index.m3u8`;
+      liveStatusTip.value = "主播已开播";
+      nextTick(() => attachLiveHls());
+    } else if (event.status === "ENDED") {
+      liveCurrent.value.playUrl = null;
+      destroyLiveHls();
+      liveStatusTip.value = "直播已结束";
+    }
+  }
+}
+
+async function sendLiveMessage() {
+  if (!loggedIn.value) return openAuth();
+  if (!liveCurrent.value) return;
+  const content = liveInput.value.trim();
+  if (!content) return;
+  try {
+    await axios.post(`/api/live/rooms/${liveCurrent.value.id}/messages`, { content }, { headers: authHeaders() });
+    liveInput.value = "";
+  } catch (error) {
+    fail(error);
+  }
+}
+
+function scrollLiveMessages() {
+  nextTick(() => {
+    const el = liveMessageList.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+
 onMounted(() => {
   loadCategories();
   loadVideos();
+  loadHotKeywords();
   progressPoll = window.setInterval(reportPlayProgress, 15000);
   if (loggedIn.value) {
     loadProfile();
@@ -1570,6 +1980,8 @@ onBeforeUnmount(() => {
   stopDanmakuRender();
   destroyHls();
   disconnectRealtime();
+  closeLiveRoomSocket();
+  destroyLiveHls();
   window.clearInterval(progressPoll);
 });
 </script>
@@ -1661,16 +2073,36 @@ onBeforeUnmount(() => {
           @click="sidebarCollapsed = !sidebarCollapsed"
         >
           ☰</button
-        ><label class="search-box"
-          ><span>⌕</span
-          ><input
-            v-model="query"
-            placeholder="搜索视频、UP主..."
-            @focus="navigate('search')"
-            @input="scheduleSearch"
-            @keyup.enter="loadSearchResults"
-          /><span class="mic">♩</span></label
-        >
+        ><div class="search-wrap">
+          <label class="search-box"
+            ><span>⌕</span
+            ><input
+              v-model="query"
+              placeholder="搜索视频、UP主..."
+              @focus="
+                navigate('search');
+                suggestVisible = true;
+              "
+              @input="
+                scheduleSearch();
+                scheduleSuggest();
+                suggestVisible = true;
+              "
+              @keyup.enter="submitSearch(query)"
+              @blur="hideSuggestSoon"
+            /><span class="mic">♩</span></label
+          >
+          <div v-if="suggestVisible && suggestions.length" class="search-suggest">
+            <button
+              v-for="item in suggestions"
+              :key="item"
+              type="button"
+              @mousedown.prevent="submitSearch(item)"
+            >
+              <span class="suggest-icon">⌕</span>{{ item }}
+            </button>
+          </div>
+        </div>
         <div class="top-actions">
           <button title="切换主题" @click="dark = !dark">☾</button
           ><button class="bell" title="通知" @click="navigate('message')">
@@ -2450,9 +2882,169 @@ onBeforeUnmount(() => {
               </template>
             </section>
           </section>
+          <section v-else-if="activePage === 'live'" class="live-page">
+            <header class="live-hero">
+              <div>
+                <h1>直播广场</h1>
+                <p>RTMP 推流接入 · HLS 拉流播放 · 实时弹幕互动</p>
+              </div>
+              <button class="live-primary" @click="loggedIn ? scrollToLiveStudio() : openAuth()">＋ 我要开播</button>
+            </header>
+
+            <section v-if="loggedIn" ref="liveStudioRef" class="live-studio-card">
+              <header class="live-section-head">
+                <h2>我的直播间</h2>
+                <span v-if="liveMineRoom" class="live-status-badge" :class="liveMineRoom.status.toLowerCase()">{{ liveStatusLabel(liveMineRoom.status) }}</span>
+                <span v-else class="live-status-badge ready">未创建</span>
+              </header>
+              <div v-if="liveMineRoom" class="live-studio-info">
+                <div class="live-push-row">
+                  <code>{{ liveMineRoom.pushUrl }}</code>
+                  <button class="live-ghost" @click="copyLivePushUrl">{{ liveCopied ? "已复制" : "复制" }}</button>
+                </div>
+                <p class="live-hint">
+                  OBS 推流设置：「服务器」填 <code>rtmp://localhost:1935/live</code>，「串流密钥」填
+                  <code>{{ liveMineRoom.streamKey }}</code>，开始推流后直播间会自动切换为直播中。
+                </p>
+                <div class="live-studio-actions">
+                  <button v-if="liveMineRoom.status !== 'LIVING'" class="live-primary" @click="startLiveRoom">标记开播</button>
+                  <button v-else class="live-ghost danger" @click="stopLiveRoom">下播</button>
+                  <button v-if="liveMineRoom.status === 'LIVING'" class="live-ghost" @click="openLiveRoom(liveMineRoom.id)">进入我的直播间</button>
+                  <button class="live-ghost" @click="refreshLiveMine">刷新状态</button>
+                </div>
+                <dl class="live-studio-stats">
+                  <div><dt>在线人数</dt><dd>{{ liveMineRoom.viewerCount }}</dd></div>
+                  <div><dt>累计弹幕</dt><dd>{{ formatCount(liveMineRoom.danmakuCount) }}</dd></div>
+                </dl>
+              </div>
+              <form class="live-form" @submit.prevent="submitLiveRoom">
+                <label class="live-field">
+                  <span>直播标题</span>
+                  <input v-model="liveTitle" maxlength="80" placeholder="给直播间起个标题，例如：周末一起打游戏" />
+                </label>
+                <div class="live-cover-row">
+                  <label class="live-cover-picker">
+                    <input type="file" accept="image/*" hidden @change="selectLiveCover" />
+                    <img v-if="liveCoverPreview || liveMineRoom?.coverUrl" :src="liveCoverPreview || liveMineRoom?.coverUrl || ''" alt="直播封面" />
+                    <span v-else>上传封面</span>
+                  </label>
+                  <button class="live-primary" type="submit" :disabled="liveCreating">
+                    {{ liveMineRoom ? "保存直播间信息" : "创建直播间" }}
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="live-list">
+              <header class="live-section-head">
+                <h2>全部直播间</h2>
+                <small>{{ liveRooms.length }} 个</small>
+              </header>
+              <p v-if="liveLoading" class="load-status">正在加载直播列表…</p>
+              <div v-else-if="liveRooms.length" class="live-grid">
+                <article v-for="room in liveRooms" :key="room.id" class="live-card" @click="openLiveRoom(room.id)">
+                  <div class="live-cover">
+                    <img v-if="room.coverUrl" :src="room.coverUrl" :alt="room.title" />
+                    <span v-else class="live-cover-fallback">◉</span>
+                    <em class="live-tag" :class="room.status.toLowerCase()">{{ liveStatusLabel(room.status) }}</em>
+                    <small v-if="room.status === 'LIVING'" class="live-viewers">◉ {{ formatCount(room.viewerCount) }}</small>
+                  </div>
+                  <h3>{{ room.title }}</h3>
+                  <p><span class="mini-avatar">{{ room.authorName.slice(0, 1) }}</span>{{ room.authorName }}</p>
+                  <small>弹幕 {{ formatCount(room.danmakuCount) }}</small>
+                </article>
+              </div>
+              <p v-else class="empty">还没有直播间，点击右上角「我要开播」创建第一场直播</p>
+            </section>
+          </section>
+          <section v-else-if="activePage === 'liveRoom' && liveCurrent" class="live-room-page">
+            <div class="live-room-main">
+              <div class="live-stage">
+                <video v-if="liveCurrent.playUrl" ref="livePlayer" autoplay playsinline controls></video>
+                <div v-else class="live-offline">
+                  <strong>{{ liveRoomLoading ? "正在进入直播间…" : liveCurrent.status === "LIVING" ? "正在等待直播画面…" : "直播尚未开始" }}</strong>
+                  <p>{{ liveStatusTip || "主播正在准备中，稍后再来看看吧" }}</p>
+                  <button v-if="liveCurrent.userId === user?.id" class="live-ghost" @click="startLiveRoom">标记开播</button>
+                </div>
+                <em class="live-tag" :class="liveCurrent.status.toLowerCase()">{{ liveStatusLabel(liveCurrent.status) }}</em>
+              </div>
+              <header class="live-room-head">
+                <div>
+                  <h1>{{ liveCurrent.title }}</h1>
+                  <p>
+                    <span class="mini-avatar">{{ liveCurrent.authorName.slice(0, 1) }}</span>{{ liveCurrent.authorName }} ·
+                    在线 {{ liveViewerCount }} 人 · 弹幕 {{ formatCount(liveCurrent.danmakuCount) }}
+                  </p>
+                </div>
+                <div class="live-room-actions">
+                  <button v-if="liveCurrent.userId === user?.id && liveCurrent.status === 'LIVING'" class="live-ghost danger" @click="stopLiveRoom">下播</button>
+                  <button class="live-ghost" @click="navigate('live')">返回直播广场</button>
+                </div>
+              </header>
+            </div>
+            <aside class="live-chat">
+              <header class="live-chat-head">
+                <h2>直播弹幕</h2>
+                <small>{{ liveViewerCount }} 人在看</small>
+              </header>
+              <div ref="liveMessageList" class="live-chat-list">
+                <div v-for="message in liveMessages" :key="message.id" class="live-chat-item">
+                  <img v-if="message.avatar" :src="message.avatar" alt="" />
+                  <span v-else class="mini-avatar">{{ message.nickname.slice(0, 1) }}</span>
+                  <p><strong>{{ message.nickname }}</strong>{{ message.content }}</p>
+                </div>
+                <p v-if="!liveMessages.length" class="live-chat-empty">还没有弹幕，来发第一条吧</p>
+              </div>
+              <form class="live-chat-input" @submit.prevent="sendLiveMessage">
+                <input
+                  v-model="liveInput"
+                  maxlength="100"
+                  :placeholder="liveCurrent.status === 'LIVING' ? '发送弹幕…' : '直播开始后即可发送弹幕'"
+                />
+                <button class="live-primary" type="submit" :disabled="liveCurrent.status !== 'LIVING'">发送</button>
+              </form>
+            </aside>
+          </section>
           <template
             v-else-if="activePage === 'recommend' || activePage === 'search'"
-            ><div v-if="activePage === 'recommend'" class="category-bar">
+            ><div v-if="activePage === 'search' && !query.trim()" class="search-landing">
+              <section v-if="hotKeywords.length" class="search-block">
+                <header>
+                  <h2>热搜榜</h2>
+                  <small>按真实搜索次数排序</small>
+                </header>
+                <div class="hot-list">
+                  <button
+                    v-for="item in hotKeywords"
+                    :key="item.keyword"
+                    @click="submitSearch(item.keyword)"
+                  >
+                    <em :class="`rank-${item.rank}`">{{ item.rank }}</em>
+                    <span>{{ item.keyword }}</span>
+                    <small v-if="item.score">{{ item.score }} 次</small>
+                  </button>
+                </div>
+              </section>
+              <section v-if="searchHistory.length" class="search-block">
+                <header>
+                  <h2>搜索历史</h2>
+                  <button class="clear-history" @click="clearSearchHistory">清空</button>
+                </header>
+                <div class="history-list">
+                  <button
+                    v-for="item in searchHistory"
+                    :key="item"
+                    @click="submitSearch(item)"
+                  >
+                    {{ item }}
+                  </button>
+                </div>
+              </section>
+              <p v-if="!hotKeywords.length && !searchHistory.length" class="empty">
+                输入视频标题或 UP 主昵称开始搜索
+              </p>
+            </div>
+            <div v-if="activePage === 'recommend'" class="category-bar">
               <button
                 :class="{ active: selectedCategory === 0 }"
                 @click="selectCategory(0)"
@@ -2467,7 +3059,7 @@ onBeforeUnmount(() => {
                 {{ category.name }}</button
               ><button class="more-category">⌄ 更多</button>
             </div>
-            <section class="video-grid">
+            <section v-if="!query.trim() || displayedVideos.length" class="video-grid">
               <article
                 v-for="video in displayedVideos"
                 :key="video.id"
@@ -2495,10 +3087,10 @@ onBeforeUnmount(() => {
                 >
               </article>
               <p
-                v-if="!displayedVideos.length && !(activePage === 'recommend' ? recommendLoading : searchLoading)"
+                v-if="query.trim() && !displayedVideos.length && !(activePage === 'recommend' ? recommendLoading : searchLoading)"
                 class="empty"
               >
-                {{ activePage === 'search' && !query.trim() ? '请输入视频标题或 UP 主昵称开始搜索' : '暂时没有匹配的视频' }}
+                {{ activePage === 'search' ? '没有找到匹配的视频，试试其他关键词' : '暂时没有匹配的视频' }}
               </p>
             </section>
             <p v-if="activePage === 'recommend' && recommendLoading" class="load-status">正在加载推荐内容…</p>

@@ -40,6 +40,7 @@ public class VideoService {
     private final TranscodeTaskMapper transcodeTaskMapper;
     private final TranscodeService transcodeService;
     private final RecommendationService recommendationService;
+    private final com.kilikili.web.search.VideoSearchIndexService searchIndexService;
     private final ConcurrentHashMap<String, UploadSession> uploadSessions = new ConcurrentHashMap<>();
 
     private record UploadSession(long userId, String objectKey, String contentType,
@@ -52,7 +53,8 @@ public class VideoService {
 
     public VideoService(VideoMapper videoMapper, StorageService storageService, NotificationService notificationService,
                         SystemSettingService systemSettingService, TranscodeTaskMapper transcodeTaskMapper,
-                        TranscodeService transcodeService, RecommendationService recommendationService) {
+                        TranscodeService transcodeService, RecommendationService recommendationService,
+                        com.kilikili.web.search.VideoSearchIndexService searchIndexService) {
         this.videoMapper = videoMapper;
         this.storageService = storageService;
         this.notificationService = notificationService;
@@ -60,6 +62,7 @@ public class VideoService {
         this.transcodeTaskMapper = transcodeTaskMapper;
         this.transcodeService = transcodeService;
         this.recommendationService = recommendationService;
+        this.searchIndexService = searchIndexService;
     }
 
     @Transactional
@@ -77,7 +80,10 @@ public class VideoService {
         VideoInsert insert = new VideoInsert(userId, title, description, objectKey, coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
         videoMapper.insertReturningId(insert);
         transcodeService.submit(insert.getId());
-        if ("PUBLISHED".equals(status)) recommendationService.evictRecommendCache();
+        if ("PUBLISHED".equals(status)) {
+            recommendationService.evictRecommendCache();
+            searchIndexService.indexAfterCommit(insert.getId());
+        }
         log.info("视频投稿已创建: videoId={}, userId={}, title={}, status={}", insert.getId(), userId, title, status);
         return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status);
     }
@@ -128,7 +134,10 @@ public class VideoService {
         VideoInsert insert = new VideoInsert(userId, title, description, session.objectKey(), coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
         videoMapper.insertReturningId(insert);
         transcodeService.submit(insert.getId());
-        if ("PUBLISHED".equals(status)) recommendationService.evictRecommendCache();
+        if ("PUBLISHED".equals(status)) {
+            recommendationService.evictRecommendCache();
+            searchIndexService.indexAfterCommit(insert.getId());
+        }
         log.info("分片上传视频投稿已创建: videoId={}, userId={}, title={}, status={}, parts={}", insert.getId(), userId, title, status, sortedPartKeys.size());
         return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status);
     }

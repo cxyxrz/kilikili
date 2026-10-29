@@ -16,6 +16,10 @@ spring:
   sql:
     init:
       mode: always
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    connection-timeout: 3s
+    socket-timeout: 5s
   ai:
     openai:
       api-key: ${DEEPSEEK_API_KEY:}
@@ -45,6 +49,18 @@ kilikili:
     initial-delay-ms: ${PLAY_PROGRESS_INITIAL_DELAY_MS:5000}
     cache-ttl-seconds: ${PLAY_PROGRESS_CACHE_TTL_SECONDS:86400}
     batch-size: ${PLAY_PROGRESS_BATCH_SIZE:200}
+  search:
+    enabled: ${SEARCH_ES_ENABLED:true}
+    index: ${SEARCH_INDEX:kilikili_video}
+    sync-interval-ms: ${SEARCH_SYNC_INTERVAL_MS:120000}
+    initial-delay-ms: ${SEARCH_SYNC_INITIAL_DELAY_MS:8000}
+  live:
+    # 主播推流地址前缀，最终地址为 {rtmp-base-url}/{streamKey}
+    rtmp-base-url: ${LIVE_RTMP_BASE_URL:rtmp://localhost:1935/live}
+    # 后端反代 SRS 的 HLS 地址（deploy/srs/srs.conf 中 http_server 监听 8082）
+    hls-base-url: ${LIVE_HLS_BASE_URL:http://127.0.0.1:8082}
+    # SRS 的 HLS 输出目录，后端读盘代理；相对路径基于后端启动目录 kilikili-web
+    hls-dir: ${LIVE_HLS_DIR:../deploy/srs/media}
   transcode:
     enabled: ${TRANSCODE_ENABLED:true}
     executor: ${TRANSCODE_EXECUTOR:docker}

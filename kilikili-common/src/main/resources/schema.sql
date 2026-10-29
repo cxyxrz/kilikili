@@ -213,6 +213,32 @@ CREATE TABLE IF NOT EXISTS system_setting (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS live_room (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  title VARCHAR(80) NOT NULL,
+  cover_object_key VARCHAR(500) NULL,
+  stream_key VARCHAR(64) NOT NULL UNIQUE,
+  status VARCHAR(16) NOT NULL DEFAULT 'READY',
+  viewer_count INT NOT NULL DEFAULT 0,
+  danmaku_count INT NOT NULL DEFAULT 0,
+  started_at DATETIME NULL,
+  ended_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_live_status_created (status, created_at),
+  INDEX idx_live_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS live_message (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  room_id BIGINT NOT NULL,
+  user_id BIGINT NULL,
+  type VARCHAR(16) NOT NULL DEFAULT 'CHAT',
+  content VARCHAR(200) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_live_message_room_created (room_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 INSERT IGNORE INTO system_setting(setting_key, setting_value, description) VALUES
   ('allow_registration', 'true', '允许新用户注册'),
   ('danmaku_enabled', 'true', '弹幕功能'),

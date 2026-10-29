@@ -179,4 +179,8 @@ public interface VideoMapper {
 
     @Insert("INSERT INTO video_danmaku(video_id,user_id,content,mode,color,time_ms) VALUES(#{videoId},#{userId},#{content},#{mode},#{color},#{timeMs})")
     int insertDanmaku(Danmaku danmaku);
+
+    /** 搜索联想降级方案：标题前缀匹配 */
+    @Select("SELECT title FROM video WHERE status='PUBLISHED' AND title LIKE CONCAT(#{prefix},'%') ORDER BY view_count DESC, id DESC LIMIT #{limit}")
+    List<String> suggestTitles(@Param("prefix") String prefix, @Param("limit") int limit);
 }

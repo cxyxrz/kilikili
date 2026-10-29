@@ -31,4 +31,12 @@ public class RecommendationController {
         int safePage = Math.max(1, page); int safeSize = Math.min(Math.max(1, pageSize), 40);
         return ApiResponse.ok(recommendationService.search(keyword, safePage, safeSize));
     }
+    @Operation(summary = "搜索联想词") @GetMapping("/search/suggest")
+    public ApiResponse<List<String>> suggest(@RequestParam String keyword) {
+        return ApiResponse.ok(recommendationService.suggest(keyword));
+    }
+    @Operation(summary = "热搜榜") @GetMapping("/search/hot")
+    public ApiResponse<List<Map<String, Object>>> hot() {
+        return ApiResponse.ok(recommendationService.hotKeywords());
+    }
 }

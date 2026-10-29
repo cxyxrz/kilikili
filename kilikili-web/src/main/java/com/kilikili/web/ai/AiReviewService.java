@@ -25,15 +25,18 @@ public class AiReviewService {
     private final AiReviewMapper aiReviewMapper;
     private final DeepSeekClient deepSeekClient;
     private final RecommendationService recommendationService;
+    private final com.kilikili.web.search.VideoSearchIndexService searchIndexService;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private boolean missingKeyLogged = false;
 
     public AiReviewService(AiReviewProperties properties, AiReviewMapper aiReviewMapper, DeepSeekClient deepSeekClient,
-                           RecommendationService recommendationService) {
+                           RecommendationService recommendationService,
+                           com.kilikili.web.search.VideoSearchIndexService searchIndexService) {
         this.properties = properties;
         this.aiReviewMapper = aiReviewMapper;
         this.deepSeekClient = deepSeekClient;
         this.recommendationService = recommendationService;
+        this.searchIndexService = searchIndexService;
     }
 
     @Scheduled(initialDelayString = "${kilikili.ai.initial-delay-ms:10000}",
@@ -74,7 +77,10 @@ public class AiReviewService {
     private boolean decide(long videoId, DeepSeekClient.Verdict verdict) {
         if (!properties.autoPublish() || !PASS.equals(verdict.result())) return false;
         boolean published = aiReviewMapper.updatePendingStatus(videoId, "PUBLISHED") > 0;
-        if (published) recommendationService.evictRecommendCache();
+        if (published) {
+            recommendationService.evictRecommendCache();
+            searchIndexService.indexVideo(videoId);
+        }
         return published;
     }
 }

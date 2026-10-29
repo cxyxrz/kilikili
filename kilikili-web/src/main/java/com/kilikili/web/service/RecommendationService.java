@@ -24,10 +24,13 @@ public class RecommendationService {
     private final StorageService storageService;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-    public RecommendationService(RecommendationMapper recommendationMapper, StorageService storageService, StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
-        this.recommendationMapper = recommendationMapper; this.storageService = storageService; this.redisTemplate = redisTemplate; this.objectMapper = objectMapper;
+    private final com.kilikili.web.search.VideoSearchService videoSearchService;
+    public RecommendationService(RecommendationMapper recommendationMapper, StorageService storageService, StringRedisTemplate redisTemplate, ObjectMapper objectMapper, com.kilikili.web.search.VideoSearchService videoSearchService) {
+        this.recommendationMapper = recommendationMapper; this.storageService = storageService; this.redisTemplate = redisTemplate; this.objectMapper = objectMapper; this.videoSearchService = videoSearchService;
     }
     public List<Category> categories() { return recommendationMapper.listCategories(); }
+    public List<String> suggest(String keyword) { return videoSearchService.suggest(keyword); }
+    public List<Map<String, Object>> hotKeywords() { return videoSearchService.hotKeywords(); }
 
     /**
      * 清空推荐列表缓存：视频状态变化（审核通过、下线、自动发布）后调用，避免新视频延迟最多 5 分钟才出现。
@@ -55,16 +58,8 @@ public class RecommendationService {
         return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total, "hasMore", (long) page * pageSize < total);
     }
     public Map<String, Object> search(String keyword, int page, int pageSize) {
-        String normalizedKeyword = keyword == null ? "" : keyword.trim();
-        if (normalizedKeyword.isEmpty()) return Map.of("items", List.of(), "page", page, "pageSize", pageSize, "total", 0L, "hasMore", false);
-        int offset = (page - 1) * pageSize;
-        List<RecommendItem> items = recommendationMapper.search(normalizedKeyword, pageSize, offset).stream()
-                .map(source -> new RecommendItem(source.id(), source.title(), source.authorName(),
-                        source.coverObjectKey() == null || source.coverObjectKey().isBlank() ? null : storageService.presignedReadUrl(source.coverObjectKey()),
-                        source.durationSeconds(), source.viewCount(), source.likeCount(), source.commentCount(), source.categoryId()))
-                .toList();
-        long total = recommendationMapper.countSearch(normalizedKeyword);
-        return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total, "hasMore", (long) page * pageSize < total);
+        // 交给 Elasticsearch 搜索服务，索引不可用时它会自动降级为 SQL 查询
+        return videoSearchService.search(keyword, page, pageSize);
     }
     private List<RecommendSource> readCache(String key) {
         try {
