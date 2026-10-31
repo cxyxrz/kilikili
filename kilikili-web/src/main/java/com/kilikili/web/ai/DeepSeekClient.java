@@ -26,6 +26,17 @@ public class DeepSeekClient {
             其中 score 表示风险分（越高越危险），无风险时 tags 为空数组。
             """;
 
+    /** 封面设计提示词：只让模型产出文案与配色，图像由服务端渲染，保证结果可控可复现 */
+    private static final String COVER_SYSTEM_PROMPT = """
+            你是中文视频网站的封面设计师，负责根据投稿标题和简介设计封面文案与配色。
+            要求：
+            - headline：封面主文案，8-14 个汉字，提炼看点、有吸引力，不得标题党或夸大事实；
+            - subline：副文案，12-20 个汉字，补充说明内容；
+            - palette：3 个十六进制颜色，依次为背景起始色、背景结束色、强调色，要求 16:9 封面上文字可读、对比度足够；
+            - motif：10 个字以内的视觉风格描述（如「科技感」「温暖治愈」「运动活力」）。
+            只输出 JSON，格式为 {"headline":"主文案","subline":"副文案","palette":["#112233","#445566","#ffcc00"],"motif":"风格"}。
+            """;
+
     private final ObjectMapper objectMapper;
     private final ChatClient chatClient;
 
@@ -77,6 +88,42 @@ public class DeepSeekClient {
         }
         if (reply == null || reply.isBlank()) throw new IllegalStateException("DeepSeek 返回内容为空");
         return parse(reply);
+    }
+
+    /** 生成封面设计稿（文案 + 配色），失败抛出由调用方降级到本地规则 */
+    public CoverBrief designCover(String title, String description, String categoryName) {
+        if (chatClient == null) throw new IllegalStateException("未配置 DEEPSEEK_API_KEY");
+        String reply;
+        try {
+            reply = chatClient.prompt()
+                    .system(COVER_SYSTEM_PROMPT)
+                    .user("""
+                            视频标题：%s
+                            视频简介：%s
+                            所在分区：%s
+                            """.formatted(nullToEmpty(title), nullToEmpty(description), nullToEmpty(categoryName)))
+                    .call()
+                    .content();
+        } catch (Exception e) {
+            throw new IllegalStateException("调用 DeepSeek 失败：" + e.getMessage(), e);
+        }
+        if (reply == null || reply.isBlank()) throw new IllegalStateException("DeepSeek 返回内容为空");
+        try {
+            JsonNode node = objectMapper.readTree(stripCodeFence(reply));
+            String headline = node.path("headline").asText("").trim();
+            String subline = node.path("subline").asText("").trim();
+            String motif = node.path("motif").asText("").trim();
+            java.util.List<String> palette = new java.util.ArrayList<>();
+            for (JsonNode color : node.path("palette")) {
+                String value = color.asText("").trim();
+                if (value.matches("#[0-9a-fA-F]{6}")) palette.add(value);
+            }
+            if (headline.isEmpty() || palette.size() < 2) throw new IllegalStateException("封面设计字段缺失");
+            return new CoverBrief(truncate(headline, 18), truncate(subline, 30), palette, truncate(motif, 12));
+        } catch (Exception e) {
+            log.warn("DeepSeek 封面设计结果无法解析：{}", truncate(reply, 300));
+            throw new IllegalStateException("封面设计结果解析失败", e);
+        }
     }
 
     private String userPrompt(AiReviewSource source) {
@@ -138,5 +185,9 @@ public class DeepSeekClient {
     }
 
     public record Verdict(String result, int score, String reason, String detail) {
+    }
+
+    /** 封面设计稿：headline 主文案、subline 副文案、palette 配色、motif 风格 */
+    public record CoverBrief(String headline, String subline, java.util.List<String> palette, String motif) {
     }
 }

@@ -1,7 +1,9 @@
 package com.kilikili.web;
 
 import com.kilikili.web.ai.AiReviewProperties;
+import com.kilikili.web.ai.vision.VisionProperties;
 import com.kilikili.web.cache.CacheGovernanceProperties;
+import com.kilikili.web.mq.MqProperties;
 import com.kilikili.web.progress.PlayProgressProperties;
 import com.kilikili.web.transcode.TranscodeProperties;
 import org.mybatis.spring.annotation.MapperScan;
@@ -14,7 +16,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @MapperScan("com.kilikili")
 @EnableScheduling
 @EnableConfigurationProperties({TranscodeProperties.class, AiReviewProperties.class, PlayProgressProperties.class,
-        CacheGovernanceProperties.class})
+        CacheGovernanceProperties.class, MqProperties.class, VisionProperties.class})
 public class KilikiliWebApplication {
     public static void main(String[] args) {
         SpringApplication.run(KilikiliWebApplication.class, args);

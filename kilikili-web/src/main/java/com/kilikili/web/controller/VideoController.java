@@ -25,6 +25,8 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -37,10 +39,17 @@ public class VideoController {
     private final AuthService authService;
     private final PlayProgressService playProgressService;
     private final DanmakuMaskService danmakuMaskService;
+    private final com.kilikili.web.cover.AiCoverService aiCoverService;
     public VideoController(VideoService videoService, AuthService authService, PlayProgressService playProgressService,
-                           DanmakuMaskService danmakuMaskService) {
+                           DanmakuMaskService danmakuMaskService,
+                           com.kilikili.web.cover.AiCoverService aiCoverService) {
         this.videoService = videoService; this.authService = authService; this.playProgressService = playProgressService;
         this.danmakuMaskService = danmakuMaskService;
+        this.aiCoverService = aiCoverService;
+    }
+
+    /** AI 封面请求体：categoryName 用于让模型判断内容风格，frames 为前端截取的视频关键帧 dataURL */
+    public record AiCoverRequest(String title, String description, String categoryName, List<String> frames) {
     }
     @Operation(summary = "获取已发布视频列表") @GetMapping public ApiResponse<List<Video>> list()
     {
@@ -114,6 +123,12 @@ public class VideoController {
     public ApiResponse<Map<String, Object>> mine(@RequestHeader("Authorization") String authorization, @RequestParam(required = false) String keyword, @RequestParam(required = false) String status, @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "10") int pageSize) {
         return ApiResponse.ok(videoService.mine(authService.requireUserId(authorization), keyword, status, Math.max(1, page), Math.min(Math.max(1, pageSize), 50)));
     }
+    @Operation(summary = "删除视频及其全部关联数据", description = "仅视频作者可用")
+    @DeleteMapping("/{id}")
+    public ApiResponse<Map<String, Object>> delete(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
+        videoService.deleteVideo(authService.requireUserId(authorization), id);
+        return ApiResponse.ok(Map.of("message", "视频已删除", "videoId", id));
+    }
     @Operation(summary = "获取当前用户创作数据") @GetMapping("/mine/stats")
     public ApiResponse<Map<String, Object>> creatorStats(@RequestHeader("Authorization") String authorization) { return ApiResponse.ok(videoService.creatorStats(authService.requireUserId(authorization))); }
     @Operation(summary = "上传视频", description = "可选上传封面、分区和时长；上传后进入待审核状态")
@@ -124,9 +139,42 @@ public class VideoController {
                                                      @RequestParam(defaultValue = "1") long categoryId,
                                                      @RequestParam(defaultValue = "0") int durationSeconds,
                                                      @RequestParam(defaultValue = "ORIGINAL") String creationDeclaration,
-                                                     @RequestPart MultipartFile cover,
+                                                     @RequestPart(required = false) MultipartFile cover,
+                                                     @RequestParam(required = false) String aiCoverObjectKey,
                                                      @RequestPart MultipartFile file) {
-        return ApiResponse.ok(videoService.upload(authService.requireUserId(authorization), title, description, categoryId, durationSeconds, creationDeclaration, cover, file));
+        return ApiResponse.ok(videoService.upload(authService.requireUserId(authorization), title, description, categoryId, durationSeconds, creationDeclaration, cover, aiCoverObjectKey, file));
+    }
+
+    @Operation(summary = "AI 生成视频封面", description = "结合浏览器截取的视频关键帧与标题，由多模态模型设计文案与配色，服务端渲染三张 16:9 候选封面")
+    @PostMapping("/cover/ai")
+    public ApiResponse<Map<String, Object>> generateCover(@RequestHeader("Authorization") String authorization,
+                                                          @RequestBody AiCoverRequest request) {
+        List<byte[]> frames = decodeFrames(request.frames());
+        return ApiResponse.ok(aiCoverService.generate(authService.requireUserId(authorization), request.title(), request.description(), request.categoryName(), frames));
+    }
+
+    @Operation(summary = "AI 生成封面（服务端截帧）", description = "FFmpeg 从已上传视频截取关键帧后生成封面")
+    @PostMapping("/{id}/cover/ai")
+    public ApiResponse<Map<String, Object>> generateCoverFromVideo(@RequestHeader("Authorization") String authorization,
+                                                                   @PathVariable long id) {
+        return ApiResponse.ok(aiCoverService.generateForVideo(authService.requireUserId(authorization), id));
+    }
+
+    /** 解析前端 dataURL 帧；限制数量与体积，非法数据直接忽略 */
+    private List<byte[]> decodeFrames(List<String> frames) {
+        if (frames == null || frames.isEmpty()) return List.of();
+        List<byte[]> decoded = new ArrayList<>();
+        for (String frame : frames) {
+            if (frame == null || frame.isBlank() || decoded.size() >= 3) continue;
+            int comma = frame.indexOf(',');
+            String base64 = frame.startsWith("data:") && comma > 0 ? frame.substring(comma + 1) : frame;
+            try {
+                byte[] bytes = Base64.getDecoder().decode(base64);
+                if (bytes.length > 0 && bytes.length <= 2 * 1024 * 1024) decoded.add(bytes);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        return decoded;
     }
 
     @Operation(summary = "初始化分片上传", description = "大文件分片上传第一步，返回sessionId")
@@ -155,8 +203,9 @@ public class VideoController {
                                                             @RequestParam(defaultValue = "1") long categoryId,
                                                             @RequestParam(defaultValue = "0") int durationSeconds,
                                                             @RequestParam(defaultValue = "ORIGINAL") String creationDeclaration,
-                                                            @RequestPart MultipartFile cover) {
-        return ApiResponse.ok(videoService.completeUpload(authService.requireUserId(authorization), sessionId, title, description, categoryId, durationSeconds, creationDeclaration, cover));
+                                                            @RequestPart(required = false) MultipartFile cover,
+                                                            @RequestParam(required = false) String aiCoverObjectKey) {
+        return ApiResponse.ok(videoService.completeUpload(authService.requireUserId(authorization), sessionId, title, description, categoryId, durationSeconds, creationDeclaration, cover, aiCoverObjectKey));
     }
     @Operation(summary = "点赞或取消点赞") @PostMapping("/{id}/like") public ApiResponse<Map<String, Object>> like(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
         return ApiResponse.ok(videoService.toggleLike(authService.requireUserId(authorization), id));

@@ -32,6 +32,16 @@ public class NotificationService {
                 Map.of("kind", "NOTIFICATION", "type", type, "content", trimmed, "unread", unread));
     }
 
+    /** 系统通知：actor 记为接收者本人，不触发“自己通知自己”的过滤 */
+    @Transactional
+    public void createSystem(long recipientId, String content, Long videoId) {
+        String trimmed = content.length() > 500 ? content.substring(0, 500) : content;
+        notificationMapper.insert(recipientId, recipientId, "SYSTEM", trimmed, videoId);
+        long unread = notificationMapper.countUnread(recipientId);
+        realtimePushService.pushAfterCommit(recipientId,
+                Map.of("kind", "NOTIFICATION", "type", "SYSTEM", "content", trimmed, "unread", unread));
+    }
+
     public Map<String, Object> list(long userId, String type, int page, int pageSize) {
         int offset = (page - 1) * pageSize;
         List<NotificationItem> items = notificationMapper.list(userId, type, pageSize, offset).stream().map(source ->

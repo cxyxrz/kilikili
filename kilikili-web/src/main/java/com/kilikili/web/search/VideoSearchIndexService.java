@@ -168,6 +168,23 @@ public class VideoSearchIndexService {
         }
     }
 
+    /** MQ 消费用：索引失败必须抛出，让消息重试；成功后阶段才算完成 */
+    public void indexVideoStrict(long videoId) {
+        if (!enabled) return;
+        Video video = videoMapper.findById(videoId);
+        if (video == null || !"PUBLISHED".equals(video.status())) {
+            deleteVideo(videoId);
+            return;
+        }
+        try {
+            client.index(request -> request.index(indexName).id(String.valueOf(videoId)).document(toDocument(video)));
+            client.indices().refresh(refresh -> refresh.index(indexName));
+        } catch (Exception exception) {
+            available = false;
+            throw new IllegalStateException("搜索索引写入失败: " + exception.getMessage(), exception);
+        }
+    }
+
     public void deleteVideo(long videoId) {
         if (!enabled) return;
         try {

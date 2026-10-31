@@ -42,6 +42,13 @@ kilikili:
     poll-interval-ms: ${AI_REVIEW_POLL_INTERVAL_MS:20000}
     initial-delay-ms: ${AI_REVIEW_INITIAL_DELAY_MS:10000}
     auto-publish: ${AI_REVIEW_AUTO_PUBLISH:false}
+    # 多模态视觉模型（OpenAI 兼容接口），用于分析视频关键帧；默认复用 DeepSeek 的 Key 与地址
+    vision:
+      enabled: ${AI_VISION_ENABLED:true}
+      chat-url: ${AI_VISION_CHAT_URL:${spring.ai.openai.base-url:https://api.deepseek.com}/chat/completions}
+      api-key: ${AI_VISION_API_KEY:${spring.ai.openai.api-key:}}
+      model: ${AI_VISION_MODEL:deepseek-chat}
+      timeout-seconds: ${AI_VISION_TIMEOUT_SECONDS:30}
     # 弹幕发送时的 DeepSeek 语义审核开关（本地敏感词库始终生效）
     danmaku-moderation-enabled: ${AI_DANMAKU_MODERATION_ENABLED:true}
   progress:
@@ -107,6 +114,21 @@ kilikili:
         height: 1080
         video-bitrate: 5000k
         audio-bitrate: 192k
+
+  mq:
+    # 未启动 broker 时可置为 false，流水线退化为进程内同步执行
+    enabled: ${MQ_ENABLED:true}
+    namesrv-addr: ${MQ_NAMESRV_ADDR:127.0.0.1:9876}
+    producer-group: ${MQ_PRODUCER_GROUP:kilikili-video-producer}
+    consumer-group: ${MQ_CONSUMER_GROUP:kilikili-video-pipeline-consumer}
+    topic: ${MQ_TOPIC:kilikili-video-pipeline}
+    max-reconsume-times: ${MQ_MAX_RECONSUME_TIMES:3}
+    send-timeout-ms: ${MQ_SEND_TIMEOUT_MS:3000}
+    consume-thread-min: ${MQ_CONSUME_THREAD_MIN:2}
+    consume-thread-max: ${MQ_CONSUME_THREAD_MAX:6}
+    # 补偿扫描：阶段停留超过 reconcile-delay-seconds 未完成则重投
+    reconcile-interval-ms: ${MQ_RECONCILE_INTERVAL_MS:60000}
+    reconcile-delay-seconds: ${MQ_RECONCILE_DELAY_SECONDS:60}
 
 management:
   endpoints:

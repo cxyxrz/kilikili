@@ -5,6 +5,7 @@ import io.minio.ComposeObjectArgs;
 import io.minio.ComposeSource;
 import io.minio.GetObjectArgs;
 import io.minio.GetPresignedObjectUrlArgs;
+import io.minio.ListObjectsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
@@ -184,6 +185,34 @@ public class StorageService {
         } catch (Exception exception) {
             log.error("本地文件上传失败: objectKey={}, file={}", objectKey, file, exception);
             throw new IllegalStateException("对象上传失败", exception);
+        }
+    }
+
+    /** 删除单个对象；对象不存在或删除失败只记录日志，不阻断上层业务 */
+    public void deleteObject(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) return;
+        try {
+            client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(objectKey).build());
+            log.info("对象已删除: objectKey={}", objectKey);
+        } catch (Exception exception) {
+            log.warn("对象删除失败: objectKey={}, {}", objectKey, exception.getMessage());
+        }
+    }
+
+    /** 按前缀批量删除对象（如视频转码生成的 HLS 切片目录） */
+    public void deletePrefix(String prefix) {
+        if (prefix == null || prefix.isBlank()) return;
+        int removed = 0;
+        try {
+            for (io.minio.Result<io.minio.messages.Item> result : client.listObjects(ListObjectsArgs.builder()
+                    .bucket(bucket).prefix(prefix).recursive(true).build())) {
+                String objectKey = result.get().objectName();
+                client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(objectKey).build());
+                removed++;
+            }
+            log.info("前缀对象已删除: prefix={}, count={}", prefix, removed);
+        } catch (Exception exception) {
+            log.warn("前缀对象删除失败: prefix={}, {}", prefix, exception.getMessage());
         }
     }
 

@@ -26,6 +26,11 @@
 .cover-suggestion { display: block; width: 102px; height: 74px; background: linear-gradient(135deg, #27313e 0 18%, #fdfdfd 18% 82%, #cfd3d8 82%); border-radius: 3px; box-shadow: inset 0 0 0 1px #e3e6eb; }
 .cover-suggestion.two { background: linear-gradient(90deg, #252e3a 0 19%, #fdfdfd 19% 81%, #cfd3d8 81%); }
 .cover-suggestion.three { background: linear-gradient(135deg, #29313b 0 16%, #fff 16% 84%, #d2d4d9 84%); }
+.ai-cover:disabled { cursor: wait; opacity: .8; }
+.cover-suggestion.ai-candidate { padding: 0; overflow: hidden; cursor: pointer; }
+.cover-suggestion.ai-candidate img { width: 100%; height: 100%; object-fit: cover; border-radius: 3px; }
+.cover-suggestion.ai-candidate.selected { box-shadow: 0 0 0 2px #6d60ff; }
+.ai-cover-note { display: block; margin-top: 8px; color: #8b96a6; font-size: 12px; }
 .title-field { position: relative; }
 .title-field input, .config-row select, .description-config-row textarea { width: 100%; color: #31445f; border: 1px solid #cfd8e5; border-radius: 5px; background: #fff; outline-color: #4fa8fa; }
 .title-field input { height: 40px; padding: 0 70px 0 12px; }
@@ -810,3 +815,21 @@ button.following-avatar:hover img, button.following-avatar:hover > span:first-ch
 .dark .transcode-panel { background: #23262f; }
 .dark .transcode-head { color: #e8edf5; }
 .dark .transcode-bar { background: #353a48; }
+
+/* 账号设置页的退出登录入口与确认弹窗 */
+.logout-option { justify-self: start; width: 96px; height: 38px; color: #e5484d; background: #fff2f2; border: 1px solid #ffd6d8; border-radius: 5px; font-weight: 600; }
+.logout-option:hover { background: #ffe8e9; }
+.confirm-modal { width: 360px; }
+.confirm-modal h2 { margin: 0; text-align: center; font-size: 18px; }
+.confirm-modal p { color: #657286; font-size: 14px; line-height: 1.7; }
+.confirm-actions { display: flex; gap: 10px; margin-top: 6px; }
+.confirm-actions button { flex: 1; height: 40px; border-radius: 7px; font-weight: 600; }
+.confirm-actions .cancel { color: #5b6676; background: #f2f4f8; }
+.confirm-actions .primary { color: #fff; background: #6d60ff; }
+.confirm-actions .danger-confirm { color: #fff; background: #e5484d; }
+.confirm-actions .danger-confirm:hover { background: #d43c41; }
+.dark .logout-option { color: #ff8187; background: #3a2629; border-color: #5a3438; }
+.dark .confirm-modal { background: #20232f; }
+.dark .confirm-modal h2 { color: #f3f5fa; }
+.dark .confirm-modal p { color: #aeb7c5; }
+.dark .confirm-actions .cancel { color: #c3cad6; background: #2c3140; }

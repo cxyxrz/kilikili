@@ -179,6 +179,7 @@ function categoryName(categoryId?: number | null) {
 }
 const creatorTab = ref<"manage" | "upload" | "stats">("manage");
 const creatorVideos = ref<CreatorVideo[]>([]);
+const deleteVideoTarget = ref<CreatorVideo | null>(null);
 const creatorKeyword = ref("");
 const creatorStatus = ref("");
 type TrendPoint = { date: string; label: string; views: number; likes: number; comments: number; followers: number };
@@ -270,6 +271,7 @@ const upload = ref({
   durationSeconds: 0,
   creationDeclaration: "ORIGINAL",
   cover: null as File | null,
+  aiCoverObjectKey: "",
   file: null as File | null,
 });
 const comment = ref("");
@@ -304,6 +306,12 @@ const avatarInput = ref<HTMLInputElement | null>(null);
 const videoInput = ref<HTMLInputElement | null>(null);
 const coverInput = ref<HTMLInputElement | null>(null);
 const coverPreview = ref("");
+// AI 封面：DeepSeek 设计文案与配色，后端渲染三张候选供选择
+const aiCoverLoading = ref(false);
+const aiCoverSource = ref<"AI" | "LOCAL" | "">("");
+const aiCoverCandidates = ref<
+  Array<{ objectKey: string; url: string; variant: number }>
+>([]);
 const isDraggingVideo = ref(false);
 const videoPlayer = ref<HTMLVideoElement | null>(null);
 const danmakuCanvas = ref<HTMLCanvasElement | null>(null);
@@ -319,31 +327,8 @@ let realtimeRetry = 0;
 let hlsInstance: Hls | null = null;
 const uploadSuccessVisible = ref(false);
 const uploadSuccessMessage = ref("");
-// 转码进度：上传成功后轮询后端，展示阶段/百分比/速度
-const transcodeProgress = ref<{
-  status: string;
-  stage: string;
-  percent: number;
-  message?: string | null;
-  speed?: number | null;
-  etaSeconds?: number | null;
-  attempt?: number | null;
-  maxAttempts?: number | null;
-} | null>(null);
-let transcodePoll = 0;
-const transcodeStageLabels: Record<string, string> = {
-  QUEUED: "排队等待",
-  RUNNING: "准备中",
-  DOWNLOAD: "下载原片",
-  PROBE: "解析视频",
-  TRANSCODE: "转码中",
-  UPLOAD: "回传切片",
-  RETRYING: "等待重试",
-  COMPLETED: "已完成",
-  FAILED: "转码失败",
-  NONE: "等待转码",
-};
 const uploadWarningVisible = ref(false);
+const logoutConfirmVisible = ref(false);
 const uploadWarningMessage = ref("");
 // 清晰度以「分辨率高度」标识，菜单优先用后端返回的转码档位填充，hls.js 解析后再校正
 const qualityLevels = ref<{ height: number; label: string }[]>([]);
@@ -867,9 +852,15 @@ function logout() {
   chatMessages.value = [];
   unreadMessageCount.value = 0;
   disconnectRealtime();
+  activePage.value = "recommend";
   localStorage.removeItem("kilikili_token");
   localStorage.removeItem("kilikili_user");
   notice.value = "已退出登录";
+}
+// 账号设置页退出确认：确定后关闭弹窗并清理会话
+function confirmLogout() {
+  logoutConfirmVisible.value = false;
+  logout();
 }
 async function loadProfile() {
   if (!loggedIn.value) return;
@@ -1364,6 +1355,23 @@ async function clearHistory() {
 function creatorAction(action: string) {
   notice.value = `${action}功能将在下一阶段开放`;
 }
+// 删除视频：先弹出确认框，确认后调用后端级联删除
+function requestDeleteVideo(video: CreatorVideo) {
+  deleteVideoTarget.value = video;
+}
+async function confirmDeleteVideo() {
+  const target = deleteVideoTarget.value;
+  if (!target) return;
+  try {
+    await axios.delete(`/api/videos/${target.id}`, { headers: authHeaders() });
+    deleteVideoTarget.value = null;
+    notice.value = `已删除《${target.title}》`;
+    await loadCreatorVideos();
+    loadCreatorDashboard();
+  } catch (error) {
+    fail(error);
+  }
+}
 function watchAction(action: string) {
   notice.value = `${action}功能将在后续阶段开放`;
 }
@@ -1566,7 +1574,117 @@ function selectCoverFile(file: File | null | undefined) {
   }
   if (coverPreview.value) URL.revokeObjectURL(coverPreview.value);
   upload.value.cover = file;
+  upload.value.aiCoverObjectKey = "";
   coverPreview.value = URL.createObjectURL(file);
+}
+// 调用多模态模型生成封面文案与配色，后端渲染三张 16:9 候选
+/** 在浏览器本地截取视频关键帧（JPEG dataURL），交给多模态模型分析画面 */
+async function captureVideoFrames(file: File, count = 3): Promise<string[]> {
+  const objectUrl = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.preload = "auto";
+  video.muted = true;
+  video.playsInline = true;
+  video.src = objectUrl;
+  const frames: string[] = [];
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(
+        () => reject(new Error("视频元数据加载超时")),
+        8000,
+      );
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timer);
+        resolve();
+      };
+      video.onerror = () => {
+        window.clearTimeout(timer);
+        reject(new Error("无法解析视频文件"));
+      };
+    });
+    const duration =
+      Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+    const sourceWidth = video.videoWidth || 640;
+    const sourceHeight = video.videoHeight || 360;
+    const scale = Math.min(1, 640 / sourceWidth);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return [];
+    const ratios = [0.1, 0.35, 0.6];
+    for (let i = 0; i < Math.min(count, ratios.length); i++) {
+      const target = duration > 0 ? duration * ratios[i] : i * 2 + 1;
+      const time = Math.max(0.2, Math.min(target, Math.max(duration - 0.2, 0.2)));
+      await new Promise<void>((resolve) => {
+        const timer = window.setTimeout(resolve, 3000);
+        video.onseeked = () => {
+          window.clearTimeout(timer);
+          resolve();
+        };
+        video.currentTime = time;
+      });
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      frames.push(canvas.toDataURL("image/jpeg", 0.72));
+    }
+  } catch {
+    return [];
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+    video.removeAttribute("src");
+  }
+  return frames;
+}
+
+async function generateAiCover() {
+  if (!upload.value.title.trim()) {
+    notice.value = "请先填写视频标题，AI 才能生成贴合内容的封面";
+    return;
+  }
+  aiCoverLoading.value = true;
+  try {
+    const categoryName =
+      categories.value.find((item) => item.id === upload.value.categoryId)?.name ??
+      "";
+    const frames = upload.value.file
+      ? await captureVideoFrames(upload.value.file, 3)
+      : [];
+    const data = (
+      await axios.post(
+        "/api/videos/cover/ai",
+        {
+          title: upload.value.title,
+          description: upload.value.description,
+          categoryName,
+          frames,
+        },
+        { headers: authHeaders() },
+      )
+    ).data.data;
+    aiCoverCandidates.value = data.candidates ?? [];
+    aiCoverSource.value = data.aiGenerated ? "AI" : "LOCAL";
+    if (data.visionUsed) {
+      notice.value = `AI 已分析 ${data.frameCount} 帧画面（${data.scene || "画面"}），点击候选图即可选用`;
+    } else if (data.aiGenerated) {
+      notice.value = `AI 封面已生成（${data.design?.motif || "智能设计"}），点击候选图即可选用`;
+    } else if (frames.length > 0) {
+      notice.value =
+        "未配置多模态视觉模型，已按标题生成封面；配置 AI_VISION_CHAT_URL 后可结合画面生成";
+    } else {
+      notice.value = "未配置 DeepSeek Key，已生成本地规则封面";
+    }
+  } catch (error) {
+    fail(error);
+  } finally {
+    aiCoverLoading.value = false;
+  }
+}
+function chooseAiCover(candidate: { objectKey: string; url: string }) {
+  if (coverPreview.value.startsWith("blob:"))
+    URL.revokeObjectURL(coverPreview.value);
+  upload.value.cover = null;
+  upload.value.aiCoverObjectKey = candidate.objectKey;
+  coverPreview.value = candidate.url;
 }
 function navigate(page: Page) {
   activePage.value = page;
@@ -1609,46 +1727,19 @@ function showUploadWarning(message: string) {
   uploadWarningVisible.value = true;
 }
 
-/** 上传成功后轮询转码进度；进入终态（完成/失败）或关闭弹窗时停止 */
-async function pollTranscodeProgress(videoId: number) {
-  window.clearInterval(transcodePoll);
-  const tick = async () => {
-    try {
-      const data = (
-        await axios.get(`/api/videos/${videoId}/transcode/progress`)
-      ).data.data;
-      transcodeProgress.value = data;
-      if (data.status === "COMPLETED" || data.status === "FAILED") {
-        window.clearInterval(transcodePoll);
-      }
-    } catch {
-      // 进度查询失败不打断用户，下一轮继续
-    }
-  };
-  await tick();
-  transcodePoll = window.setInterval(tick, 2000);
-}
-function stopTranscodePoll() {
-  window.clearInterval(transcodePoll);
-}
-watch(uploadSuccessVisible, (visible) => {
-  if (!visible) stopTranscodePoll();
-});
-
 async function sendUpload() {
   if (!upload.value.file) {
     showUploadWarning("「视频文件」未选择，请先选择要上传的视频");
     return;
   }
-  if (!upload.value.cover) {
-    showUploadWarning("「视频封面」未上传，请先选择封面图片");
+  if (!upload.value.cover && !upload.value.aiCoverObjectKey) {
+    showUploadWarning("「视频封面」未上传，请先选择封面图片或使用 AI 生成");
     return;
   }
   if (!upload.value.title.trim()) {
     showUploadWarning("「视频标题」未填写，请填写后再提交");
     return;
   }
-  let publishedVideoId = 0;
   try {
     const file = upload.value.file;
     const CHUNK_SIZE = 5 * 1024 * 1024;
@@ -1687,7 +1778,11 @@ async function sendUpload() {
       completeForm.append("categoryId", String(upload.value.categoryId));
       completeForm.append("durationSeconds", String(upload.value.durationSeconds));
       completeForm.append("creationDeclaration", upload.value.creationDeclaration);
-      completeForm.append("cover", upload.value.cover);
+      if (upload.value.aiCoverObjectKey) {
+        completeForm.append("aiCoverObjectKey", upload.value.aiCoverObjectKey);
+      } else if (upload.value.cover) {
+        completeForm.append("cover", upload.value.cover);
+      }
       const completeData = (
         await axios.post(
           "/api/videos/upload/complete",
@@ -1699,7 +1794,6 @@ async function sendUpload() {
         )
       ).data.data;
       notice.value = completeData.message;
-      publishedVideoId = completeData.videoId ?? 0;
     } else {
       const form = new FormData();
       form.append("title", upload.value.title);
@@ -1707,23 +1801,27 @@ async function sendUpload() {
       form.append("categoryId", String(upload.value.categoryId));
       form.append("durationSeconds", String(upload.value.durationSeconds));
       form.append("creationDeclaration", upload.value.creationDeclaration);
-      form.append("cover", upload.value.cover);
+      if (upload.value.aiCoverObjectKey) {
+        form.append("aiCoverObjectKey", upload.value.aiCoverObjectKey);
+      } else if (upload.value.cover) {
+        form.append("cover", upload.value.cover);
+      }
       form.append("file", upload.value.file);
       const uploadData = (
         await axios.post("/api/videos/upload", form, { headers: authHeaders() })
       ).data.data;
       notice.value = uploadData.message;
-      publishedVideoId = uploadData.videoId ?? 0;
     }
 
     uploadSuccessMessage.value = notice.value || "投稿提交成功";
     uploadWarningVisible.value = false;
-    transcodeProgress.value = null;
     uploadSuccessVisible.value = true;
-    if (publishedVideoId > 0) pollTranscodeProgress(publishedVideoId);
 
-    if (coverPreview.value) URL.revokeObjectURL(coverPreview.value);
+    if (coverPreview.value.startsWith("blob:"))
+      URL.revokeObjectURL(coverPreview.value);
     coverPreview.value = "";
+    aiCoverCandidates.value = [];
+    aiCoverSource.value = "";
     upload.value = {
       title: "",
       description: "",
@@ -1731,6 +1829,7 @@ async function sendUpload() {
       durationSeconds: 0,
       creationDeclaration: "ORIGINAL",
       cover: null,
+      aiCoverObjectKey: "",
       file: null,
     };
     if (videoInput.value) videoInput.value.value = "";
@@ -2219,18 +2318,8 @@ onBeforeUnmount(() => {
           <i v-else-if="item.key === 'chat' && unreadMessageCount > 0" class="nav-badge">{{ unreadMessageCount > 99 ? "99+" : unreadMessageCount }}</i>
         </button>
       </nav>
-      <div class="account-area">
-        <template v-if="loggedIn"
-          ><span class="avatar small">{{ avatarText }}</span>
-          <div class="account-name">
-            <b>{{ user?.nickname }}</b
-            ><small>Lv.1</small>
-          </div>
-          <button class="logout" title="退出登录" @click="logout">
-            ↪
-          </button></template
-        >
-        <button v-else class="login-entry" @click="openAuth()">
+      <div v-if="!loggedIn" class="account-area">
+        <button class="login-entry" @click="openAuth()">
           <span class="avatar small">K</span><span>登录 / 注册</span>
         </button>
       </div>
@@ -2631,7 +2720,7 @@ onBeforeUnmount(() => {
                         <button @click="creatorAction('编辑')">编辑</button
                         ><button @click="creatorAction('发布设置')">
                           发布设置</button
-                        ><button class="danger" @click="creatorAction('删除')">
+                        ><button class="danger" @click="requestDeleteVideo(video)">
                           删除
                         </button>
                       </td>
@@ -2713,6 +2802,7 @@ onBeforeUnmount(() => {
                     @click="
                       upload.file = null;
                       upload.cover = null;
+                      upload.aiCoverObjectKey = '';
                       coverPreview = '';
                     "
                   >
@@ -2755,14 +2845,39 @@ onBeforeUnmount(() => {
                   <div class="suggestion-list">
                     <button
                       class="ai-cover"
-                      @click="creatorAction('AI 封面生成')"
+                      :disabled="aiCoverLoading"
+                      @click="generateAiCover"
                     >
-                      AI生成
+                      {{ aiCoverLoading ? "生成中…" : aiCoverCandidates.length ? "重新生成" : "AI生成" }}
                     </button>
-                    <span class="cover-suggestion one"></span>
-                    <span class="cover-suggestion two"></span>
-                    <span class="cover-suggestion three"></span>
+                    <button
+                      v-for="(candidate, index) in aiCoverCandidates"
+                      :key="candidate.objectKey"
+                      class="cover-suggestion ai-candidate"
+                      :class="{
+                        selected: upload.aiCoverObjectKey === candidate.objectKey,
+                      }"
+                      @click="chooseAiCover(candidate)"
+                    >
+                      <img
+                        :src="candidate.url"
+                        :alt="`AI 候选封面 ${index + 1}`"
+                      />
+                    </button>
+                    <span
+                      v-for="index in 3 - aiCoverCandidates.length"
+                      :key="`cover-blank-${index}`"
+                      class="cover-suggestion"
+                      :class="['one', 'two', 'three'][index - 1]"
+                    ></span>
                   </div>
+                  <small v-if="aiCoverSource" class="ai-cover-note">
+                    {{
+                      aiCoverSource === "AI"
+                        ? "封面文案与配色由 DeepSeek 生成，点击候选图即可选用"
+                        : "未配置 DeepSeek Key，当前为本地规则生成"
+                    }}
+                  </small>
                 </div>
                 <div class="config-row">
                   <label><i>*</i>标题</label>
@@ -3669,6 +3784,15 @@ onBeforeUnmount(() => {
               <label></label
               ><button class="save-button" @click="saveProfile">保存</button>
             </div>
+            <div class="setting-row logout-row">
+              <label>账号</label
+              ><button
+                class="logout-option"
+                @click="logoutConfirmVisible = true"
+              >
+                退出登录
+              </button>
+            </div>
           </section>
           <section v-else class="empty-state">
             <div class="empty-icon">◌</div>
@@ -3739,35 +3863,6 @@ onBeforeUnmount(() => {
         <div class="success-icon">✓</div>
         <h2>上传成功</h2>
         <p>{{ uploadSuccessMessage }}</p>
-        <div v-if="transcodeProgress" class="transcode-panel">
-          <div class="transcode-head">
-            <b>{{
-              transcodeStageLabels[transcodeProgress.stage] ||
-              transcodeProgress.stage
-            }}</b>
-            <span>{{ transcodeProgress.percent ?? 0 }}%</span>
-          </div>
-          <div class="transcode-bar">
-            <i :style="{ width: (transcodeProgress.percent ?? 0) + '%' }"></i>
-          </div>
-          <p class="transcode-hint">
-            <span v-if="transcodeProgress.attempt && transcodeProgress.attempt > 1"
-              >第 {{ transcodeProgress.attempt }}/{{
-                transcodeProgress.maxAttempts
-              }}
-              次尝试</span
-            >
-            <span v-if="transcodeProgress.speed"
-              >{{ transcodeProgress.speed }}x</span
-            >
-            <span v-if="transcodeProgress.etaSeconds"
-              >约剩 {{ transcodeProgress.etaSeconds }} 秒</span
-            >
-            <span v-if="transcodeProgress.status === 'FAILED'" class="transcode-error"
-              >{{ transcodeProgress.message || "转码失败，可稍后重试" }}</span
-            >
-          </p>
-        </div>
         <button class="primary" @click="uploadSuccessVisible = false">知道了</button>
       </section>
     </div>
@@ -3783,6 +3878,40 @@ onBeforeUnmount(() => {
         <h2>无法上传</h2>
         <p>{{ uploadWarningMessage }}</p>
         <button class="primary" @click="uploadWarningVisible = false">去填写</button>
+      </section>
+    </div>
+
+    <div
+      v-if="logoutConfirmVisible"
+      class="modal-mask"
+      @click.self="logoutConfirmVisible = false"
+    >
+      <section class="auth-modal confirm-modal">
+        <h2>退出登录</h2>
+        <p>确定要退出当前账号吗？</p>
+        <div class="confirm-actions">
+          <button class="cancel" @click="logoutConfirmVisible = false">
+            取消
+          </button>
+          <button class="primary" @click="confirmLogout">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="deleteVideoTarget"
+      class="modal-mask"
+      @click.self="deleteVideoTarget = null"
+    >
+      <section class="auth-modal confirm-modal">
+        <h2>删除视频</h2>
+        <p>
+          确定删除《{{ deleteVideoTarget.title }}》吗？视频下的评论、弹幕、转码文件等数据将一并清除，且不可恢复。
+        </p>
+        <div class="confirm-actions">
+          <button class="cancel" @click="deleteVideoTarget = null">取消</button>
+          <button class="danger-confirm" @click="confirmDeleteVideo">删除</button>
+        </div>
       </section>
     </div>
   </div>

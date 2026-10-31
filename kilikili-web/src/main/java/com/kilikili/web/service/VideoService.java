@@ -17,10 +17,13 @@ import com.kilikili.web.entity.FavoriteVideoItem;
 import com.kilikili.web.entity.FavoriteVideoSource;
 import com.kilikili.web.mapper.TranscodeTaskMapper;
 import com.kilikili.web.mapper.TranscodeProgressMapper;
+import com.kilikili.web.mapper.VideoCleanupMapper;
 import com.kilikili.web.mapper.VideoMapper;
 import com.kilikili.web.transcode.TranscodeService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,8 +47,10 @@ public class VideoService {
     private final TranscodeService transcodeService;
     private final RecommendationService recommendationService;
     private final com.kilikili.web.search.VideoSearchIndexService searchIndexService;
+    private final com.kilikili.web.mq.VideoPipelineService pipelineService;
     private final com.kilikili.web.mapper.DanmakuInsightMapper danmakuInsightMapper;
     private final DanmakuModerationService danmakuModerationService;
+    private final VideoCleanupMapper videoCleanupMapper;
     private final ConcurrentHashMap<String, UploadSession> uploadSessions = new ConcurrentHashMap<>();
 
     private record UploadSession(long userId, String objectKey, String contentType,
@@ -61,8 +66,10 @@ public class VideoService {
                         TranscodeProgressMapper transcodeProgressMapper,
                         TranscodeService transcodeService, RecommendationService recommendationService,
                         com.kilikili.web.search.VideoSearchIndexService searchIndexService,
+                        com.kilikili.web.mq.VideoPipelineService pipelineService,
                         com.kilikili.web.mapper.DanmakuInsightMapper danmakuInsightMapper,
-                        DanmakuModerationService danmakuModerationService) {
+                        DanmakuModerationService danmakuModerationService,
+                        VideoCleanupMapper videoCleanupMapper) {
         this.videoMapper = videoMapper;
         this.storageService = storageService;
         this.notificationService = notificationService;
@@ -72,31 +79,29 @@ public class VideoService {
         this.transcodeService = transcodeService;
         this.recommendationService = recommendationService;
         this.searchIndexService = searchIndexService;
+        this.pipelineService = pipelineService;
         this.danmakuInsightMapper = danmakuInsightMapper;
         this.danmakuModerationService = danmakuModerationService;
+        this.videoCleanupMapper = videoCleanupMapper;
     }
 
     @Transactional
-    public Map<String, Object> upload(long userId, String title, String description, long categoryId, int durationSeconds, String creationDeclaration, MultipartFile cover, MultipartFile file) {
+    public Map<String, Object> upload(long userId, String title, String description, long categoryId, int durationSeconds, String creationDeclaration, MultipartFile cover, String aiCoverObjectKey, MultipartFile file) {
         if (file.isEmpty()) throw new BusinessException("请选择视频文件");
         if (file.getSize() > 16L * 1024 * 1024 * 1024) throw new BusinessException("视频大小不能超过 16GB");
         if (file.getContentType() == null || !file.getContentType().startsWith("video/")) throw new BusinessException("仅支持视频文件");
         if (durationSeconds < 0 || durationSeconds > 24 * 60 * 60) throw new BusinessException("视频时长不合法");
         if (!("ORIGINAL".equals(creationDeclaration) || "REPRINT".equals(creationDeclaration))) throw new BusinessException("创作声明不合法");
-        if (cover == null || cover.isEmpty()) throw new BusinessException("请上传封面");
         String objectKey = storageService.uploadVideo(file, userId);
-        String coverObjectKey = storageService.uploadCover(cover, userId);
+        String coverObjectKey = resolveCover(userId, cover, aiCoverObjectKey);
         boolean reviewEnabled = systemSettingService.isEnabled(SystemSettingService.VIDEO_REVIEW_ENABLED);
         String status = reviewEnabled ? "PENDING_REVIEW" : "PUBLISHED";
         VideoInsert insert = new VideoInsert(userId, title, description, objectKey, coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
         videoMapper.insertReturningId(insert);
-        transcodeService.submit(insert.getId());
-        if ("PUBLISHED".equals(status)) {
-            recommendationService.evictRecommendCache();
-            searchIndexService.indexAfterCommit(insert.getId());
-        }
+        // 投稿成功后由 MQ 流水线推进：审核 → 转码 → 通知 → 建索引
+        pipelineService.start(insert.getId());
         log.info("视频投稿已创建: videoId={}, userId={}, title={}, status={}", insert.getId(), userId, title, status);
-        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status, "videoId", insert.getId());
+        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，审核通过后自动转码" : "上传成功，已自动发布，后台转码中", "status", status, "videoId", insert.getId());
     }
 
     public Map<String, Object> initUpload(long userId, String filename, String contentType) {
@@ -125,12 +130,11 @@ public class VideoService {
                                               String title, String description,
                                               long categoryId, int durationSeconds,
                                               String creationDeclaration,
-                                              MultipartFile cover) {
+                                              MultipartFile cover, String aiCoverObjectKey) {
         UploadSession session = requireUploadSession(sessionId, userId);
         if (session.partKeys().isEmpty()) throw new BusinessException("未上传任何分片");
         if (!("ORIGINAL".equals(creationDeclaration) || "REPRINT".equals(creationDeclaration))) throw new BusinessException("创作声明不合法");
         if (durationSeconds < 0 || durationSeconds > 24 * 60 * 60) throw new BusinessException("视频时长不合法");
-        if (cover == null || cover.isEmpty()) throw new BusinessException("请上传封面");
 
         List<String> sortedPartKeys = session.partKeys().keySet().stream()
                 .sorted()
@@ -139,18 +143,27 @@ public class VideoService {
         storageService.composeChunks(session.objectKey(), sortedPartKeys, session.contentType());
         uploadSessions.remove(sessionId);
 
-        String coverObjectKey = storageService.uploadCover(cover, userId);
+        String coverObjectKey = resolveCover(userId, cover, aiCoverObjectKey);
         boolean reviewEnabled = systemSettingService.isEnabled(SystemSettingService.VIDEO_REVIEW_ENABLED);
         String status = reviewEnabled ? "PENDING_REVIEW" : "PUBLISHED";
         VideoInsert insert = new VideoInsert(userId, title, description, session.objectKey(), coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
         videoMapper.insertReturningId(insert);
-        transcodeService.submit(insert.getId());
-        if ("PUBLISHED".equals(status)) {
-            recommendationService.evictRecommendCache();
-            searchIndexService.indexAfterCommit(insert.getId());
-        }
+        pipelineService.start(insert.getId());
         log.info("分片上传视频投稿已创建: videoId={}, userId={}, title={}, status={}, parts={}", insert.getId(), userId, title, status, sortedPartKeys.size());
-        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，后台转码中" : "上传成功，已自动发布，后台转码中", "status", status, "videoId", insert.getId());
+        return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，审核通过后自动转码" : "上传成功，已自动发布，后台转码中", "status", status, "videoId", insert.getId());
+    }
+
+    /**
+     * 封面来源二选一：AI 封面直接复用已上传到 MinIO 的对象（限定本人目录），否则使用上传的封面文件。
+     */
+    private String resolveCover(long userId, MultipartFile cover, String aiCoverObjectKey) {
+        if (aiCoverObjectKey != null && !aiCoverObjectKey.isBlank()) {
+            String prefix = "covers/" + userId + "/";
+            if (!aiCoverObjectKey.startsWith(prefix)) throw new BusinessException("封面来源不合法");
+            return aiCoverObjectKey;
+        }
+        if (cover == null || cover.isEmpty()) throw new BusinessException("请上传封面");
+        return storageService.uploadCover(cover, userId);
     }
 
     private UploadSession requireUploadSession(String sessionId, long userId) {
@@ -314,6 +327,54 @@ public class VideoService {
         return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total, "hasMore", (long) page * pageSize < total);
     }
     public Map<String, Object> creatorStats(long userId) { return videoMapper.creatorStats(userId); }
+
+    /**
+     * 删除视频及其全部关联数据：数据库按 video_id 逐表清理，事务提交后再清理对象存储、ES 索引与推荐缓存。
+     * 仅作者本人可删除。
+     */
+    @Transactional
+    public void deleteVideo(long userId, long videoId) {
+        Video video = videoMapper.findById(videoId);
+        if (video == null) throw new BusinessException("视频不存在");
+        if (video.authorId() != userId) throw new BusinessException("只能删除自己发布的视频");
+        videoCleanupMapper.deleteComments(videoId);
+        videoCleanupMapper.deleteDanmakus(videoId);
+        videoCleanupMapper.deleteLikes(videoId);
+        videoCleanupMapper.deleteFavorites(videoId);
+        videoCleanupMapper.deleteViewHistory(videoId);
+        videoCleanupMapper.deletePlayProgress(videoId);
+        videoCleanupMapper.deleteDanmakuAnalysis(videoId);
+        videoCleanupMapper.deleteDanmakuMasks(videoId);
+        videoCleanupMapper.deleteAudits(videoId);
+        videoCleanupMapper.deleteTranscodeAttempts(videoId);
+        videoCleanupMapper.deleteTranscodeProgress(videoId);
+        videoCleanupMapper.deleteTranscodeTasks(videoId);
+        videoCleanupMapper.deletePipeline(videoId);
+        videoCleanupMapper.deleteConsumeLogs(videoId);
+        videoCleanupMapper.deleteDeadLetters(videoId);
+        videoCleanupMapper.deleteNotifications(videoId);
+        videoCleanupMapper.deleteVideo(videoId);
+        log.info("视频关联数据已删除: videoId={}, authorId={}, title={}", videoId, userId, video.title());
+
+        Runnable externalCleanup = () -> {
+            searchIndexService.deleteVideo(videoId);
+            recommendationService.evictRecommendCache();
+            storageService.deleteObject(video.objectKey());
+            storageService.deleteObject(video.coverObjectKey());
+            String base = video.objectKey().contains(".")
+                    ? video.objectKey().substring(0, video.objectKey().lastIndexOf('.')) : video.objectKey();
+            storageService.deletePrefix(base + "/hls");
+        };
+        // 外部资源只能在事务提交后清理，避免回滚时索引与文件已被删除
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() { externalCleanup.run(); }
+            });
+        } else {
+            externalCleanup.run();
+        }
+    }
 
     @Transactional
     public void recordHistory(long userId, long videoId) {

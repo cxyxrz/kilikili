@@ -325,3 +325,45 @@ CREATE TABLE IF NOT EXISTS transcode_task_attempt (
   INDEX idx_transcode_attempt_task (task_id),
   INDEX idx_transcode_attempt_status_started (status, started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 投稿流水线状态（投稿→审核→转码→通知→建索引），每个视频每个阶段一行，供幂等与最终一致补偿
+CREATE TABLE IF NOT EXISTS video_pipeline (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  video_id BIGINT NOT NULL,
+  stage VARCHAR(20) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+  attempts INT NOT NULL DEFAULT 0,
+  event_id VARCHAR(64) NULL,
+  error VARCHAR(500) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_pipeline_video_stage (video_id, stage),
+  INDEX idx_pipeline_stage_status (stage, status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 消费幂等表：同一 msgId 只执行一次，重投时直接跳过
+CREATE TABLE IF NOT EXISTS mq_consume_log (
+  msg_id VARCHAR(80) PRIMARY KEY,
+  topic VARCHAR(80) NOT NULL,
+  stage VARCHAR(20) NULL,
+  video_id BIGINT NULL,
+  consumed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_mq_log_video (video_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 死信落库：超过最大重试次数的消息在此留存，可人工回放
+CREATE TABLE IF NOT EXISTS mq_dead_letter (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  msg_id VARCHAR(80) NOT NULL,
+  topic VARCHAR(80) NOT NULL,
+  stage VARCHAR(20) NULL,
+  video_id BIGINT NULL,
+  payload TEXT NULL,
+  error VARCHAR(1000) NULL,
+  reconsume_times INT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'NEW',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  replayed_at DATETIME NULL,
+  UNIQUE KEY uk_dlq_msg (msg_id),
+  INDEX idx_dlq_status (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
