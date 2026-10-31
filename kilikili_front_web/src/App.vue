@@ -137,6 +137,58 @@ const token = ref(localStorage.getItem("kilikili_token") || "");
 const user = ref<User | null>(
   JSON.parse(localStorage.getItem("kilikili_user") || "null"),
 );
+
+/** 写请求的幂等键：路径 + 载荷指纹，相同提交在 10 分钟内复用同一个键 */
+function idempotencyKey(config: {
+  method?: string;
+  url?: string;
+  data?: unknown;
+}) {
+  const parts: string[] = [config.url ?? ""];
+  if (config.data instanceof FormData) {
+    config.data.forEach((value, name) => {
+      parts.push(
+        name +
+          ":" +
+          (value instanceof File ? `${value.name}:${value.size}` : String(value)),
+      );
+    });
+  } else if (typeof config.data === "string") {
+    parts.push(config.data);
+  } else if (config.data) {
+    try {
+      parts.push(JSON.stringify(config.data));
+    } catch {
+      // 无法序列化时退化为仅按路径判重
+    }
+  }
+  const raw = parts.join("|");
+  let hash = 0;
+  for (let i = 0; i < raw.length; i++) {
+    hash = (hash * 31 + raw.charCodeAt(i)) | 0;
+  }
+  return `idem-${Math.abs(hash).toString(36)}-${raw.length}`;
+}
+
+axios.interceptors.request.use((config) => {
+  const method = (config.method ?? "get").toUpperCase();
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    if (!config.headers["X-Idempotency-Key"]) {
+      config.headers["X-Idempotency-Key"] = idempotencyKey(config);
+    }
+  }
+  return config;
+});
+
+// 服务端在 JWT 临近过期时会通过 X-Auth-Token 下发新令牌，这里静默替换
+axios.interceptors.response.use((response) => {
+  const renewed = response.headers?.["x-auth-token"];
+  if (typeof renewed === "string" && renewed) {
+    token.value = renewed;
+    localStorage.setItem("kilikili_token", renewed);
+  }
+  return response;
+});
 const activePage = ref<Page>("recommend");
 const sidebarCollapsed = ref(false);
 const dark = ref(false);
@@ -836,7 +888,15 @@ async function submitAuth() {
     fail(error);
   }
 }
-function logout() {
+async function logout() {
+  // 先通知服务端注销会话（使 JWT 立即失效），失败也不阻塞本地退出
+  if (token.value) {
+    try {
+      await axios.post("/api/auth/logout", {}, { headers: authHeaders() });
+    } catch {
+      // 网络异常时仅做本地清理
+    }
+  }
   token.value = "";
   user.value = null;
   historyVideos.value = [];

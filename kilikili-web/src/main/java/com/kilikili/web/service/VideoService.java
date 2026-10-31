@@ -1,6 +1,7 @@
 package com.kilikili.web.service;
 
 import com.kilikili.common.exception.BusinessException;
+import com.kilikili.common.auth.OwnershipGuard;
 import com.kilikili.common.storage.StorageService;
 import com.kilikili.common.setting.SystemSettingService;
 import com.kilikili.web.entity.TranscodeTask;
@@ -336,7 +337,7 @@ public class VideoService {
     public void deleteVideo(long userId, long videoId) {
         Video video = videoMapper.findById(videoId);
         if (video == null) throw new BusinessException("视频不存在");
-        if (video.authorId() != userId) throw new BusinessException("只能删除自己发布的视频");
+        OwnershipGuard.requireOwner(userId, video.authorId(), "删除该视频");
         videoCleanupMapper.deleteComments(videoId);
         videoCleanupMapper.deleteDanmakus(videoId);
         videoCleanupMapper.deleteLikes(videoId);

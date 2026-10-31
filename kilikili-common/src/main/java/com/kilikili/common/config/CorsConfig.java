@@ -15,6 +15,8 @@ public class CorsConfig {
         config.setAllowedOrigins(List.of("http://localhost:3000", "http://localhost:3001"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        // 续期令牌与限流提示通过响应头下发，需显式暴露给浏览器
+        config.setExposedHeaders(List.of("X-Auth-Token", "Retry-After"));
         config.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

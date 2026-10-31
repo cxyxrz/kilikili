@@ -11,6 +11,8 @@ import com.kilikili.web.entity.Video;
 import com.kilikili.web.entity.VideoComment;
 import com.kilikili.web.progress.PlayProgressService;
 import com.kilikili.web.progress.PlayProgressSnapshot;
+import com.kilikili.web.security.Idempotent;
+import com.kilikili.web.security.RateLimit;
 import com.kilikili.web.service.DanmakuMaskService;
 import com.kilikili.web.service.VideoService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -133,6 +135,8 @@ public class VideoController {
     public ApiResponse<Map<String, Object>> creatorStats(@RequestHeader("Authorization") String authorization) { return ApiResponse.ok(videoService.creatorStats(authService.requireUserId(authorization))); }
     @Operation(summary = "上传视频", description = "可选上传封面、分区和时长；上传后进入待审核状态")
     @PostMapping(value = "/upload", consumes = "multipart/form-data")
+    @RateLimit(name = "video:upload", capacity = 5, refillPerSecond = 0.1)
+    @Idempotent(ttlSeconds = 600)
     public ApiResponse<Map<String, Object>> upload(@RequestHeader("Authorization") String authorization,
                                                      @RequestParam @NotBlank @Size(max = 80) String title,
                                                      @RequestParam(required = false, defaultValue = "") @Size(max = 2000) String description,
@@ -147,6 +151,7 @@ public class VideoController {
 
     @Operation(summary = "AI 生成视频封面", description = "结合浏览器截取的视频关键帧与标题，由多模态模型设计文案与配色，服务端渲染三张 16:9 候选封面")
     @PostMapping("/cover/ai")
+    @RateLimit(name = "video:cover:ai", capacity = 6, refillPerSecond = 0.1)
     public ApiResponse<Map<String, Object>> generateCover(@RequestHeader("Authorization") String authorization,
                                                           @RequestBody AiCoverRequest request) {
         List<byte[]> frames = decodeFrames(request.frames());
@@ -196,6 +201,8 @@ public class VideoController {
 
     @Operation(summary = "完成分片上传", description = "大文件分片上传第三步，合并分片并创建视频记录")
     @PostMapping(value = "/upload/complete", consumes = "multipart/form-data")
+    @RateLimit(name = "video:upload", capacity = 5, refillPerSecond = 0.1)
+    @Idempotent(ttlSeconds = 600)
     public ApiResponse<Map<String, Object>> completeUpload(@RequestHeader("Authorization") String authorization,
                                                             @RequestParam String sessionId,
                                                             @RequestParam @NotBlank @Size(max = 80) String title,
@@ -207,10 +214,13 @@ public class VideoController {
                                                             @RequestParam(required = false) String aiCoverObjectKey) {
         return ApiResponse.ok(videoService.completeUpload(authService.requireUserId(authorization), sessionId, title, description, categoryId, durationSeconds, creationDeclaration, cover, aiCoverObjectKey));
     }
-    @Operation(summary = "点赞或取消点赞") @PostMapping("/{id}/like") public ApiResponse<Map<String, Object>> like(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
+    @Operation(summary = "点赞或取消点赞") @PostMapping("/{id}/like")
+    @RateLimit(name = "video:like", capacity = 20, refillPerSecond = 2)
+    public ApiResponse<Map<String, Object>> like(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
         return ApiResponse.ok(videoService.toggleLike(authService.requireUserId(authorization), id));
     }
     @Operation(summary = "收藏或取消收藏") @PostMapping("/{id}/favorite")
+    @RateLimit(name = "video:favorite", capacity = 20, refillPerSecond = 2)
     public ApiResponse<Map<String, Object>> favorite(@RequestHeader("Authorization") String authorization, @PathVariable long id) {
         return ApiResponse.ok(videoService.toggleFavorite(authService.requireUserId(authorization), id));
     }
@@ -240,12 +250,15 @@ public class VideoController {
         return ApiResponse.ok(videoService.danmakuHeatmap(id, bucketSeconds));
     }
     @Operation(summary = "发送视频弹幕") @PostMapping("/{id}/danmakus")
+    @RateLimit(name = "video:danmaku", capacity = 20, refillPerSecond = 2)
     public ApiResponse<Void> sendDanmaku(@RequestHeader("Authorization") String authorization, @PathVariable long id,
                                          @Valid @RequestBody DanmakuRequest request) {
         videoService.sendDanmaku(authService.requireUserId(authorization), id, request.content(), request.mode(), request.color(), request.timeMs());
         return ApiResponse.ok(null);
     }
-    @Operation(summary = "发布视频评论") @PostMapping("/{id}/comments") public ApiResponse<Void> comment(@RequestHeader("Authorization") String authorization, @PathVariable long id, @Valid @RequestBody CommentRequest request) {
+    @Operation(summary = "发布视频评论") @PostMapping("/{id}/comments")
+    @RateLimit(name = "video:comment", capacity = 10, refillPerSecond = 0.5)
+    public ApiResponse<Void> comment(@RequestHeader("Authorization") String authorization, @PathVariable long id, @Valid @RequestBody CommentRequest request) {
         videoService.comment(authService.requireUserId(authorization), id, request.content()); return ApiResponse.ok(null);
     }
     @Operation(summary = "回复视频评论") @PostMapping("/{id}/comments/{commentId}/replies")

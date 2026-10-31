@@ -54,6 +54,7 @@ public class PrivateMessageController {
 
     @Operation(summary = "发送私信")
     @PostMapping
+    @com.kilikili.web.security.RateLimit(name = "message:send", capacity = 30, refillPerSecond = 1)
     public ApiResponse<Map<String, Object>> send(@RequestHeader("Authorization") String authorization,
                                                  @Valid @RequestBody SendMessageRequest request) {
         return ApiResponse.ok(privateMessageService.send(authService.requireUserId(authorization), request.toId(), request.content()));

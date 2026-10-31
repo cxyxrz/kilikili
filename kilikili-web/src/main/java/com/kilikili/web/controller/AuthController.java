@@ -8,6 +8,7 @@ import com.kilikili.web.dto.ProfileUpdateRequest;
 import com.kilikili.web.entity.Account;
 import com.kilikili.web.entity.AccountProfile;
 import com.kilikili.web.service.AccountService;
+import com.kilikili.web.security.RateLimit;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -25,12 +26,32 @@ public class AuthController {
         this.accountService = accountService; this.authService = authService;
     }
     @Operation(summary = "注册账号") @PostMapping("/register")
+    @RateLimit(name = "auth:register", capacity = 5, refillPerSecond = 0.2, perUser = false)
     public ApiResponse<Map<String, Object>> register(@Valid @RequestBody RegisterRequest request) {
         return ApiResponse.ok(accountService.register(request));
     }
     @Operation(summary = "用户登录") @PostMapping("/login")
+    @RateLimit(name = "auth:login", capacity = 10, refillPerSecond = 0.5, perUser = false)
     public ApiResponse<Map<String, Object>> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.ok(accountService.login(request));
+    }
+    @Operation(summary = "JWT 续期", description = "访问令牌临近过期时换取新令牌；短期令牌也可由响应头自动续期")
+    @PostMapping("/refresh")
+    public ApiResponse<Map<String, Object>> refresh(@RequestHeader("Authorization") String authorization) {
+        String newToken = authService.renewIfNeeded(authorization).orElse(null);
+        long userId = authService.requireUserId(authorization);
+        if (newToken == null) {
+            // 尚未到期：直接返回原令牌，前端无需替换
+            return ApiResponse.ok(Map.of("renewed", false, "userId", userId,
+                    "expiresHintMinutes", 0));
+        }
+        return ApiResponse.ok(Map.of("renewed", true, "token", newToken, "userId", userId));
+    }
+    @Operation(summary = "退出登录", description = "删除服务端会话，令牌立即失效")
+    @PostMapping("/logout")
+    public ApiResponse<Void> logout(@RequestHeader("Authorization") String authorization) {
+        authService.logout(authorization);
+        return ApiResponse.ok(null);
     }
     @Operation(summary = "获取当前登录用户") @GetMapping("/me")
     public ApiResponse<Account> me(@RequestHeader("Authorization") String authorization) {
