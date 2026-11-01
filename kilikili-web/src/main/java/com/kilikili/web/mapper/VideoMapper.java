@@ -60,6 +60,10 @@ public interface VideoMapper {
     @Select("SELECT " + VIDEO_COLUMNS + "FROM video v JOIN account a ON a.id=v.author_id WHERE v.status='PUBLISHED' ORDER BY v.created_at DESC LIMIT #{limit}")
     List<Video> listPublished(int limit);
 
+    /** 对账用：数据库侧所有已发布视频 id */
+    @Select("SELECT id FROM video WHERE status='PUBLISHED' ORDER BY id LIMIT #{limit}")
+    List<Long> listPublishedIds(int limit);
+
     @Insert("INSERT INTO video(author_id,title,description,object_key,cover_object_key,category_id,duration_seconds,creation_declaration,status) VALUES(#{authorId},#{title},#{description},#{objectKey},#{coverObjectKey},#{categoryId},#{durationSeconds},#{creationDeclaration},#{status})")
     int insert(@Param("authorId") long authorId, @Param("title") String title, @Param("description") String description, @Param("objectKey") String objectKey, @Param("coverObjectKey") String coverObjectKey, @Param("categoryId") long categoryId, @Param("durationSeconds") int durationSeconds, @Param("creationDeclaration") String creationDeclaration, @Param("status") String status);
 

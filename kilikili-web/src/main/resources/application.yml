@@ -37,6 +37,9 @@ kilikili:
     jwt-secret: ${JWT_SECRET:kilikili-dev-jwt-secret-please-change-0123456789}
     access-ttl-minutes: ${JWT_ACCESS_TTL_MINUTES:120}
     renew-threshold-minutes: ${JWT_RENEW_THRESHOLD_MINUTES:30}
+  # 可观测性：慢 SQL 超过该阈值写入 slow-sql.log 并上报指标
+  observability:
+    slow-sql-threshold-ms: ${SLOW_SQL_THRESHOLD_MS:200}
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     access-key: ${MINIO_ACCESS_KEY:minioadmin}
@@ -66,9 +69,20 @@ kilikili:
     batch-size: ${PLAY_PROGRESS_BATCH_SIZE:200}
   search:
     enabled: ${SEARCH_ES_ENABLED:true}
+    # 这里是别名名称，真实数据落在 kilikili_video_<时间戳> 物理索引
     index: ${SEARCH_INDEX:kilikili_video}
     sync-interval-ms: ${SEARCH_SYNC_INTERVAL_MS:120000}
     initial-delay-ms: ${SEARCH_SYNC_INITIAL_DELAY_MS:8000}
+    # 零停机重建后保留几份旧索引用于回滚
+    keep-old-indices: ${SEARCH_KEEP_OLD_INDICES:1}
+    # 运维接口（重建/对账/状态）令牌，为空时接口禁用
+    admin-token: ${SEARCH_ADMIN_TOKEN:}
+    # Outbox 补偿任务：扫描间隔、批量大小、最大重试次数
+    outbox-interval-ms: ${SEARCH_OUTBOX_INTERVAL_MS:30000}
+    outbox-batch-size: ${SEARCH_OUTBOX_BATCH_SIZE:50}
+    outbox-max-attempts: ${SEARCH_OUTBOX_MAX_ATTEMPTS:8}
+    # 全量对账间隔
+    reconcile-interval-ms: ${SEARCH_RECONCILE_INTERVAL_MS:600000}
   # 推荐页缓存治理：穿透空值缓存 / 击穿分布式锁 / 雪崩 TTL 抖动 + 本地 L1 / 延迟双删 / 热点 key 探测
   cache:
     recommend-ttl-seconds: ${CACHE_RECOMMEND_TTL_SECONDS:300}
@@ -140,4 +154,16 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus,metrics
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # 给 http.server.requests 生成直方图桶与分位，Prometheus 可直接计算 P90/P95/P99
+      percentiles-histogram:
+        http.server.requests: true
+      percentiles:
+        http.server.requests: 0.5,0.9,0.95,0.99

@@ -196,6 +196,9 @@ const query = ref("");
 const videos = ref<Video[]>([]);
 const searchResults = ref<Video[]>([]);
 const searchLoading = ref(false);
+// 拼写纠错提示：后端无命中时返回 correctedKeyword，或标记 fuzzy 表示展示相近结果
+const correctedKeyword = ref("");
+const fuzzyMatched = ref(false);
 // 搜索联想、热搜榜与本地搜索历史
 const suggestions = ref<string[]>([]);
 const suggestVisible = ref(false);
@@ -721,13 +724,18 @@ async function loadSearchResults() {
   const keyword = query.value.trim();
   if (!keyword) {
     searchResults.value = [];
+    correctedKeyword.value = "";
+    fuzzyMatched.value = false;
     return;
   }
   searchLoading.value = true;
   try {
-    searchResults.value = (await axios.get("/api/search", {
+    const data = (await axios.get("/api/search", {
       params: { keyword, page: 1, pageSize: 40 },
-    })).data.data.items;
+    })).data.data;
+    searchResults.value = data.items;
+    correctedKeyword.value = data.correctedKeyword || "";
+    fuzzyMatched.value = !!data.fuzzy;
     rememberSearch(keyword);
     loadHotKeywords();
   } catch (error) {
@@ -3496,6 +3504,12 @@ onBeforeUnmount(() => {
                 </div>
               </article>
             </section>
+            <p v-if="activePage === 'search' && correctedKeyword" class="load-status">
+              没有找到“{{ query }}”，已按“{{ correctedKeyword }}”为你搜索
+            </p>
+            <p v-else-if="activePage === 'search' && fuzzyMatched" class="load-status">
+              没有找到“{{ query }}”，以下为拼写相近的结果
+            </p>
             <p
               v-if="!displayedVideos.length && !(activePage === 'recommend' ? recommendLoading : searchLoading)"
               class="empty"

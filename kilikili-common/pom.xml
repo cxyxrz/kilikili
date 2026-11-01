@@ -29,6 +29,11 @@
         <artifactId>mybatis-spring-boot-starter</artifactId>
         <version>3.0.4</version>
     </dependency>
+    <!-- 指标埋点：慢 SQL 上报 Micrometer（版本由 Spring Boot 管理） -->
+    <dependency>
+        <groupId>io.micrometer</groupId>
+        <artifactId>micrometer-core</artifactId>
+    </dependency>
     <dependency>
         <groupId>com.mysql</groupId>
         <artifactId>mysql-connector-j</artifactId>

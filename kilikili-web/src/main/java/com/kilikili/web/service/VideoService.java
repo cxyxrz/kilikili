@@ -48,6 +48,7 @@ public class VideoService {
     private final TranscodeService transcodeService;
     private final RecommendationService recommendationService;
     private final com.kilikili.web.search.VideoSearchIndexService searchIndexService;
+    private final com.kilikili.web.search.SearchSyncService searchSyncService;
     private final com.kilikili.web.mq.VideoPipelineService pipelineService;
     private final com.kilikili.web.mapper.DanmakuInsightMapper danmakuInsightMapper;
     private final DanmakuModerationService danmakuModerationService;
@@ -67,6 +68,7 @@ public class VideoService {
                         TranscodeProgressMapper transcodeProgressMapper,
                         TranscodeService transcodeService, RecommendationService recommendationService,
                         com.kilikili.web.search.VideoSearchIndexService searchIndexService,
+                        com.kilikili.web.search.SearchSyncService searchSyncService,
                         com.kilikili.web.mq.VideoPipelineService pipelineService,
                         com.kilikili.web.mapper.DanmakuInsightMapper danmakuInsightMapper,
                         DanmakuModerationService danmakuModerationService,
@@ -80,6 +82,7 @@ public class VideoService {
         this.transcodeService = transcodeService;
         this.recommendationService = recommendationService;
         this.searchIndexService = searchIndexService;
+        this.searchSyncService = searchSyncService;
         this.pipelineService = pipelineService;
         this.danmakuInsightMapper = danmakuInsightMapper;
         this.danmakuModerationService = danmakuModerationService;
@@ -101,6 +104,10 @@ public class VideoService {
         videoMapper.insertReturningId(insert);
         // 投稿成功后由 MQ 流水线推进：审核 → 转码 → 通知 → 建索引
         pipelineService.start(insert.getId());
+        // 双写补偿：直接发布的视频在同一事务内落一条 ES 同步任务，索引失败也能自动重试
+        if ("PUBLISHED".equals(status)) {
+            searchSyncService.enqueue(insert.getId(), com.kilikili.web.search.SearchSyncService.UPSERT);
+        }
         log.info("视频投稿已创建: videoId={}, userId={}, title={}, status={}", insert.getId(), userId, title, status);
         return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，审核通过后自动转码" : "上传成功，已自动发布，后台转码中", "status", status, "videoId", insert.getId());
     }
@@ -150,6 +157,9 @@ public class VideoService {
         VideoInsert insert = new VideoInsert(userId, title, description, session.objectKey(), coverObjectKey, categoryId, durationSeconds, creationDeclaration, status);
         videoMapper.insertReturningId(insert);
         pipelineService.start(insert.getId());
+        if ("PUBLISHED".equals(status)) {
+            searchSyncService.enqueue(insert.getId(), com.kilikili.web.search.SearchSyncService.UPSERT);
+        }
         log.info("分片上传视频投稿已创建: videoId={}, userId={}, title={}, status={}, parts={}", insert.getId(), userId, title, status, sortedPartKeys.size());
         return Map.of("message", reviewEnabled ? "上传成功，正在等待审核，审核通过后自动转码" : "上传成功，已自动发布，后台转码中", "status", status, "videoId", insert.getId());
     }
@@ -355,6 +365,8 @@ public class VideoService {
         videoCleanupMapper.deleteDeadLetters(videoId);
         videoCleanupMapper.deleteNotifications(videoId);
         videoCleanupMapper.deleteVideo(videoId);
+        // 与删除事务一起落补偿任务，保证 ES 文档最终被清理
+        searchSyncService.enqueue(videoId, com.kilikili.web.search.SearchSyncService.DELETE);
         log.info("视频关联数据已删除: videoId={}, authorId={}, title={}", videoId, userId, video.title());
 
         Runnable externalCleanup = () -> {

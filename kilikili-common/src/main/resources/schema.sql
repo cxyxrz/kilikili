@@ -367,3 +367,18 @@ CREATE TABLE IF NOT EXISTS mq_dead_letter (
   UNIQUE KEY uk_dlq_msg (msg_id),
   INDEX idx_dlq_status (status, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 搜索索引同步补偿表（Outbox）：视频状态变更与任务落库在同一事务，后台任务重试写入 ES
+CREATE TABLE IF NOT EXISTS search_sync_task (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  video_id BIGINT NOT NULL,
+  operation VARCHAR(12) NOT NULL DEFAULT 'UPSERT',
+  status VARCHAR(12) NOT NULL DEFAULT 'PENDING',
+  attempts INT NOT NULL DEFAULT 0,
+  next_retry_at DATETIME NULL,
+  last_error VARCHAR(500) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_search_sync_video (video_id),
+  INDEX idx_search_sync_status (status, next_retry_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

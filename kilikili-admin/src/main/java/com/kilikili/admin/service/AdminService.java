@@ -25,6 +25,8 @@ public class AdminService {
     public void updateVideoStatus(long id, String status) {
         if (!VIDEO_STATUSES.contains(status)) throw new BusinessException("不支持的视频状态");
         if (adminMapper.updateVideoStatus(id, status) == 0) throw new BusinessException("视频不存在");
+        // 审核/下架变化与状态更新同事务落 ES 同步任务，由 web 端补偿任务消费
+        adminMapper.enqueueSearchSync(id, "PUBLISHED".equals(status) ? "UPSERT" : "DELETE");
         evictRecommendCache();
         log.info("管理员更新视频状态: videoId={}, status={}", id, status);
     }

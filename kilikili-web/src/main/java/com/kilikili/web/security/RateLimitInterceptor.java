@@ -3,6 +3,7 @@ package com.kilikili.web.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kilikili.common.api.ApiResponse;
 import com.kilikili.common.auth.AuthService;
+import com.kilikili.web.observability.BusinessMetrics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -55,12 +56,15 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private final StringRedisTemplate redisTemplate;
     private final AuthService authService;
     private final ObjectMapper objectMapper;
+    private final BusinessMetrics businessMetrics;
     private final DefaultRedisScript<Long> script;
 
-    public RateLimitInterceptor(StringRedisTemplate redisTemplate, AuthService authService, ObjectMapper objectMapper) {
+    public RateLimitInterceptor(StringRedisTemplate redisTemplate, AuthService authService,
+                                ObjectMapper objectMapper, BusinessMetrics businessMetrics) {
         this.redisTemplate = redisTemplate;
         this.authService = authService;
         this.objectMapper = objectMapper;
+        this.businessMetrics = businessMetrics;
         this.script = new DefaultRedisScript<>(TOKEN_BUCKET_SCRIPT, Long.class);
     }
 
@@ -85,6 +89,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if (allowed != null && allowed == 1L) return true;
 
         log.warn("触发限流: key={}, uri={}", key, request.getRequestURI());
+        businessMetrics.rateLimited(name);
         response.setHeader("Retry-After", String.valueOf(Math.max(1,
                 (int) Math.ceil(1.0 / Math.max(0.1, limit.refillPerSecond())))));
         writeJson(response, 429, "操作过于频繁，请稍后再试");

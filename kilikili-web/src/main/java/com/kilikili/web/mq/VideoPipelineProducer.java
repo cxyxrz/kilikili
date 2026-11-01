@@ -1,6 +1,7 @@
 package com.kilikili.web.mq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kilikili.common.observability.TraceContext;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
@@ -59,12 +60,15 @@ public class VideoPipelineProducer {
 
     public SendResult send(PipelineMessage message) throws Exception {
         if (!ready) throw new IllegalStateException("RocketMQ 生产者未就绪");
+        // traceId 作为消息属性透传，消费端恢复后即可串起「接口请求 → MQ → 流水线阶段」整条链路
+        String traceId = TraceContext.normalize(TraceContext.current());
         Message mqMessage = new Message(properties.topic(), message.stage(),
                 String.valueOf(message.videoId()),
                 objectMapper.writeValueAsString(message).getBytes(StandardCharsets.UTF_8));
+        mqMessage.putUserProperty(TraceContext.MDC_KEY, traceId);
         SendResult result = producer.send(mqMessage);
-        log.info("流水线消息已投递: videoId={}, stage={}, msgId={}, queue={}",
-                message.videoId(), message.stage(), result.getMsgId(), result.getMessageQueue().getQueueId());
+        log.info("流水线消息已投递: traceId={}, videoId={}, stage={}, msgId={}, queue={}",
+                traceId, message.videoId(), message.stage(), result.getMsgId(), result.getMessageQueue().getQueueId());
         return result;
     }
 }

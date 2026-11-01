@@ -1,11 +1,14 @@
 package com.kilikili.web.search;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.SuggestMode;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.CompletionSuggestOption;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.Suggestion;
+import co.elastic.clients.elasticsearch.core.search.TermSuggestOption;
 import com.kilikili.common.storage.StorageService;
 import com.kilikili.web.entity.Category;
 import com.kilikili.web.entity.RecommendItem;
@@ -66,7 +69,30 @@ public class VideoSearchService {
         if (normalized.length() < 2) return databaseSearch(normalized, page, pageSize);
         if (!indexService.available()) return databaseSearch(normalized, page, pageSize);
         try {
-            return elasticSearch(normalized, page, pageSize);
+            Map<String, Object> result = elasticSearch(normalized, page, pageSize);
+            if (totalOf(result) == 0 && normalized.length() <= 10 && !normalized.contains(" ")) {
+                // 没有命中时先尝试 term suggester 给出纠错词，再按纠错词重查
+                String corrected = spellCorrection(normalized);
+                if (corrected != null) {
+                    Map<String, Object> correctedResult = elasticSearch(corrected, page, pageSize);
+                    if (totalOf(correctedResult) > 0) {
+                        correctedResult.put("correctedKeyword", corrected);
+                        correctedResult.put("originalKeyword", normalized);
+                        log.info("搜索无结果，按拼写纠错返回: original={}, corrected={}", normalized, corrected);
+                        return correctedResult;
+                    }
+                }
+                // 纠正词仍无结果时用模糊检索兜底（中文短词用编辑距离 1，避免召回过多无关内容）
+                Map<String, Object> fuzzyResult = elasticSearch(normalized, page, pageSize,
+                        normalized.length() <= 4 ? "1" : "AUTO");
+                if (totalOf(fuzzyResult) > 0) {
+                    fuzzyResult.put("fuzzy", true);
+                    fuzzyResult.put("originalKeyword", normalized);
+                    log.info("搜索无结果，按模糊匹配返回: original={}, fuzzy={}", normalized, normalized.length() <= 4 ? 1 : "AUTO");
+                    return fuzzyResult;
+                }
+            }
+            return result;
         } catch (Exception exception) {
             log.warn("Elasticsearch 检索失败，降级为数据库查询: {}", exception.getMessage());
             return databaseSearch(normalized, page, pageSize);
@@ -134,16 +160,24 @@ public class VideoSearchService {
     }
 
     private Map<String, Object> elasticSearch(String keyword, int page, int pageSize) throws Exception {
+        return elasticSearch(keyword, page, pageSize, null);
+    }
+
+    /** fuzziness 为空时走精确分词检索，否则启用编辑距离匹配作为纠错兜底 */
+    private Map<String, Object> elasticSearch(String keyword, int page, int pageSize, String fuzziness) throws Exception {
         int from = (page - 1) * pageSize;
         SearchResponse<Map> response = client.search(request -> request
                         .index(indexName)
                         .from(from)
                         .size(pageSize)
                         .query(query -> query.bool(bool -> bool
-                                .must(must -> must.multiMatch(multi -> multi
-                                        .query(keyword)
-                                        .fields("title^3", "authorName^2", "description")
-                                        .type(TextQueryType.BestFields)))
+                                .must(must -> must.multiMatch(multi -> {
+                                    multi.query(keyword)
+                                            .fields("title^3", "authorName^2", "description")
+                                            .type(TextQueryType.BestFields);
+                                    if (fuzziness != null) multi.fuzziness(fuzziness).operator(Operator.And);
+                                    return multi;
+                                }))
                                 .filter(filter -> filter.term(term -> term.field("status").value("PUBLISHED")))))
                         .sort(sort -> sort.score(score -> score.order(co.elastic.clients.elasticsearch._types.SortOrder.Desc)))
                         .sort(sort -> sort.field(field -> field.field("viewCount").order(co.elastic.clients.elasticsearch._types.SortOrder.Desc)))
@@ -155,8 +189,47 @@ public class VideoSearchService {
             items.add(toItem(hit.id(), hit.source()));
         }
         long total = response.hits().total() == null ? items.size() : response.hits().total().value();
-        return Map.of("items", items, "page", page, "pageSize", pageSize, "total", total,
-                "hasMore", (long) page * pageSize < total, "engine", "elasticsearch");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", items);
+        result.put("page", page);
+        result.put("pageSize", pageSize);
+        result.put("total", total);
+        result.put("hasMore", (long) page * pageSize < total);
+        result.put("engine", "elasticsearch");
+        return result;
+    }
+
+    /**
+     * 拼写纠错：term suggester 对标题字段的已索引词给出候选，取第一个合理结果。
+     * 只对短关键词启用，避免把整句查询拆成单个词导致语义丢失。
+     */
+    private String spellCorrection(String keyword) throws Exception {
+        SearchResponse<Map> response = client.search(request -> request
+                        .index(indexName)
+                        .suggest(suggest -> suggest.suggesters("spell", suggester -> suggester
+                                .text(keyword)
+                                .term(term -> term
+                                        .field("title")
+                                        .size(5)
+                                        .suggestMode(SuggestMode.Always)))),
+                Map.class);
+        List<Suggestion<Map>> groups = response.suggest().get("spell");
+        if (groups == null) return null;
+        for (Suggestion<Map> group : groups) {
+            if (!group.isTerm()) continue;
+            for (TermSuggestOption option : group.term().options()) {
+                String text = option.text();
+                if (text == null || text.isBlank() || text.equalsIgnoreCase(keyword)) continue;
+                if (text.length() > 20) continue;
+                return text;
+            }
+        }
+        return null;
+    }
+
+    private long totalOf(Map<String, Object> result) {
+        Object total = result.get("total");
+        return total instanceof Number number ? number.longValue() : 0L;
     }
 
     private Map<String, Object> databaseSearch(String keyword, int page, int pageSize) {

@@ -1,0 +1,10 @@
+apiVersion: 1
+
+datasources:
+  - name: Kilikili Prometheus
+    uid: kilikili-prometheus
+    type: prometheus
+    access: proxy
+    url: http://kilikili-prometheus:9090
+    isDefault: true
+    editable: true

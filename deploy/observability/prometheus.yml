@@ -1,0 +1,19 @@
+# KiliKili 本地可观测性：抓取 web(7071) / admin(7070) 的 Actuator Prometheus 端点
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: kilikili-web
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:7071"]
+        labels:
+          application: kilikili-web
+
+  - job_name: kilikili-admin
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:7070"]
+        labels:
+          application: kilikili-admin

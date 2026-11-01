@@ -26,17 +26,20 @@ public class AiReviewService {
     private final DeepSeekClient deepSeekClient;
     private final RecommendationService recommendationService;
     private final com.kilikili.web.search.VideoSearchIndexService searchIndexService;
+    private final com.kilikili.web.search.SearchSyncService searchSyncService;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private boolean missingKeyLogged = false;
 
     public AiReviewService(AiReviewProperties properties, AiReviewMapper aiReviewMapper, DeepSeekClient deepSeekClient,
                            RecommendationService recommendationService,
-                           com.kilikili.web.search.VideoSearchIndexService searchIndexService) {
+                           com.kilikili.web.search.VideoSearchIndexService searchIndexService,
+                           com.kilikili.web.search.SearchSyncService searchSyncService) {
         this.properties = properties;
         this.aiReviewMapper = aiReviewMapper;
         this.deepSeekClient = deepSeekClient;
         this.recommendationService = recommendationService;
         this.searchIndexService = searchIndexService;
+        this.searchSyncService = searchSyncService;
     }
 
     @Scheduled(initialDelayString = "${kilikili.ai.initial-delay-ms:10000}",
@@ -80,6 +83,8 @@ public class AiReviewService {
         if (published) {
             recommendationService.evictRecommendCache();
             searchIndexService.indexVideo(videoId);
+            // 双写补偿：AI 自动发布同样落 outbox 任务，索引失败时后台重试
+            searchSyncService.enqueue(videoId, com.kilikili.web.search.SearchSyncService.UPSERT);
         }
         return published;
     }

@@ -1,0 +1,548 @@
+{
+  "uid": "kilikili-security-observability",
+  "title": "KiliKili 登录限流与慢 SQL",
+  "tags": ["kilikili", "security", "sql", "observability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "登录限流",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "登录限流累计次数",
+      "description": "kilikili.rate.limited 计数器，rule=auth:login",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 0, "y": 1, "w": 6, "h": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "sum(kilikili_rate_limited_total{rule=\"auth:login\"})",
+          "instant": true,
+          "range": false,
+          "legendFormat": "auth:login"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 100 },
+              { "color": "red", "value": 1000 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "登录 429 占比",
+      "description": "登录接口中 429 占全部请求的百分比（基于应用启动至今的计数）",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 6, "y": 1, "w": 6, "h": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "100 * sum(http_server_requests_seconds_count{uri=\"/api/auth/login\",status=\"429\"}) / clamp_min(sum(http_server_requests_seconds_count{uri=\"/api/auth/login\"}), 1)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "429 占比"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "限流触发速率（按规则）",
+      "description": "kilikili_rate_limited_total 的每秒增长速率",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "sum by (rule) (rate(kilikili_rate_limited_total[$__rate_interval]))",
+          "legendFormat": "{{rule}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": true,
+            "pointSize": 5,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "axisCenteredZero": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "gradientMode": "none",
+            "insertNulls": false,
+            "scaleDistribution": { "type": "linear" },
+            "stacking": { "mode": "none", "group": "" },
+            "thresholdsStyle": { "mode": "off" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "登录请求结果（200 / 429）",
+      "description": "按状态码统计登录接口请求量",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 0, "y": 11, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "sum by (status) (increase(http_server_requests_seconds_count{uri=\"/api/auth/login\",status=~\"200|429\"}[$__rate_interval]))",
+          "legendFormat": "HTTP {{status}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "spanNulls": true,
+            "pointSize": 5,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "axisCenteredZero": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "gradientMode": "none",
+            "insertNulls": false,
+            "scaleDistribution": { "type": "linear" },
+            "stacking": { "mode": "normal", "group": "A" },
+            "thresholdsStyle": { "mode": "off" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "限流累计次数（按规则）",
+      "description": "单调递增计数器，用于快速判断限流是否持续触发",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 12, "y": 11, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "sum by (rule) (kilikili_rate_limited_total)",
+          "legendFormat": "{{rule}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "pointSize": 5,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "axisCenteredZero": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "gradientMode": "none",
+            "insertNulls": false,
+            "scaleDistribution": { "type": "linear" },
+            "stacking": { "mode": "none", "group": "" },
+            "thresholdsStyle": { "mode": "off" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom", "calcs": [] },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "慢 SQL",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 19, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "慢 SQL 累计次数",
+      "description": "超过 kilikili.observability.slow-sql-threshold-ms 的 SQL 次数",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 0, "y": 20, "w": 6, "h": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "sum(kilikili_sql_slow_total)",
+          "instant": true,
+          "range": false,
+          "legendFormat": "slow sql"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 10 },
+              { "color": "red", "value": 100 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "已统计 SQL 语句数",
+      "description": "被 SlowSqlInterceptor 记录耗时的 Mapper 方法数量",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 6, "y": 20, "w": 6, "h": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "count(count by (statement) (kilikili_sql_duration_seconds_count))",
+          "instant": true,
+          "range": false,
+          "legendFormat": "statements"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "SQL 耗时与慢 SQL 总览",
+      "description": "按 Mapper 方法聚合：平均耗时、调用次数、慢 SQL 次数",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "1000 * sum by (statement) (kilikili_sql_duration_seconds_sum) / clamp_min(sum by (statement) (kilikili_sql_duration_seconds_count), 1)",
+          "legendFormat": "平均耗时(ms)",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "sum by (statement) (kilikili_sql_duration_seconds_count)",
+          "legendFormat": "调用次数",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "sum by (statement) (kilikili_sql_slow_total)",
+          "legendFormat": "慢SQL次数",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        { "id": "joinByField", "options": { "byField": "statement", "mode": "outer" } }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false,
+            "filterable": false
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "平均耗时(ms)" },
+            "properties": [
+              { "id": "unit", "value": "ms" },
+              { "id": "decimals", "value": 1 },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 200 }, { "color": "red", "value": 500 }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "慢SQL次数" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 10 }] } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [{ "displayName": "平均耗时(ms)", "desc": true }],
+        "footer": { "show": false, "reducer": ["sum"], "countRows": false, "fields": "" }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "慢 SQL 增长（按 Mapper）",
+      "description": "每个采集周期新增的慢 SQL 次数",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 0, "y": 30, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "sum by (statement) (increase(kilikili_sql_slow_total[$__rate_interval]))",
+          "legendFormat": "{{statement}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 50,
+            "showPoints": "never",
+            "spanNulls": true,
+            "pointSize": 5,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "axisCenteredZero": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "gradientMode": "none",
+            "insertNulls": false,
+            "scaleDistribution": { "type": "linear" },
+            "stacking": { "mode": "normal", "group": "A" },
+            "thresholdsStyle": { "mode": "off" },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "各 Mapper 平均 SQL 耗时",
+      "description": "kilikili.sql.duration 的 sum/count 比值，单位毫秒",
+      "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+      "gridPos": { "x": 12, "y": 30, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "kilikili-prometheus" },
+          "expr": "1000 * sum by (statement) (rate(kilikili_sql_duration_seconds_sum[$__rate_interval])) / clamp_min(sum by (statement) (rate(kilikili_sql_duration_seconds_count[$__rate_interval])), 0.001)",
+          "legendFormat": "{{statement}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true,
+            "pointSize": 5,
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "axisCenteredZero": false,
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "gradientMode": "none",
+            "insertNulls": false,
+            "scaleDistribution": { "type": "linear" },
+            "stacking": { "mode": "none", "group": "" },
+            "thresholdsStyle": {
+              "mode": "dashed",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "orange", "value": 200 },
+                { "color": "red", "value": 500 }
+              ]
+            },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 200 },
+              { "color": "red", "value": 500 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    }
+  ]
+}

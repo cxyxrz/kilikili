@@ -3,6 +3,7 @@ package com.kilikili.web.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kilikili.common.api.ApiResponse;
 import com.kilikili.common.auth.AuthService;
+import com.kilikili.web.observability.BusinessMetrics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -31,11 +32,14 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
     private final StringRedisTemplate redisTemplate;
     private final AuthService authService;
     private final ObjectMapper objectMapper;
+    private final BusinessMetrics businessMetrics;
 
-    public IdempotencyInterceptor(StringRedisTemplate redisTemplate, AuthService authService, ObjectMapper objectMapper) {
+    public IdempotencyInterceptor(StringRedisTemplate redisTemplate, AuthService authService,
+                                  ObjectMapper objectMapper, BusinessMetrics businessMetrics) {
         this.redisTemplate = redisTemplate;
         this.authService = authService;
         this.objectMapper = objectMapper;
+        this.businessMetrics = businessMetrics;
     }
 
     @Override
@@ -65,6 +69,7 @@ public class IdempotencyInterceptor implements HandlerInterceptor {
 
         String state = redisTemplate.opsForValue().get(redisKey);
         log.warn("重复提交被拦截: key={}, state={}", redisKey, state);
+        businessMetrics.idempotentRejected(DONE.equals(state) ? DONE : PROCESSING);
         writeJson(response, 409, DONE.equals(state)
                 ? "该操作已完成，请勿重复提交"
                 : "请求正在处理中，请勿重复提交");

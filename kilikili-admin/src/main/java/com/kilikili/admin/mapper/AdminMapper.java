@@ -34,4 +34,11 @@ public interface AdminMapper {
 
     @Update("UPDATE video SET status=#{status} WHERE id=#{id}")
     int updateVideoStatus(@Param("id") long id, @Param("status") String status);
+
+    /** 审核状态变化后落 ES 同步补偿任务，与状态更新同事务 */
+    @Insert("INSERT INTO search_sync_task(video_id, operation, status, attempts, next_retry_at) " +
+            "VALUES(#{videoId}, #{operation}, 'PENDING', 0, NOW()) " +
+            "ON DUPLICATE KEY UPDATE operation=VALUES(operation), status='PENDING', attempts=0, " +
+            "next_retry_at=NOW(), last_error=NULL")
+    int enqueueSearchSync(@Param("videoId") long videoId, @Param("operation") String operation);
 }
