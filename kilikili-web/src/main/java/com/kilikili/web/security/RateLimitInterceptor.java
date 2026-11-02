@@ -81,11 +81,19 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                 : limit.name();
         String key = KEY_PREFIX + name + ":" + subject(request, limit.perUser());
         long nowSeconds = System.currentTimeMillis() / 1000;
-        Long allowed = redisTemplate.execute(script, List.of(key),
-                String.valueOf(limit.capacity()),
-                String.valueOf(limit.refillPerSecond()),
-                String.valueOf(nowSeconds),
-                BUCKET_TTL_SECONDS);
+        Long allowed;
+        try {
+            allowed = redisTemplate.execute(script, List.of(key),
+                    String.valueOf(limit.capacity()),
+                    String.valueOf(limit.refillPerSecond()),
+                    String.valueOf(nowSeconds),
+                    BUCKET_TTL_SECONDS);
+        } catch (Exception exception) {
+            // Redis 故障时降级放行：限流是保护措施，不应反过来阻断正常业务
+            log.warn("限流降级（Redis 不可用），本次请求直接放行: key={}", key, exception);
+            businessMetrics.rateLimitDegraded(name);
+            return true;
+        }
         if (allowed != null && allowed == 1L) return true;
 
         log.warn("触发限流: key={}, uri={}", key, request.getRequestURI());

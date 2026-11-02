@@ -20,6 +20,11 @@ public class BusinessMetrics {
         meterRegistry.counter("kilikili.rate.limited", "rule", rule).increment();
     }
 
+    /** 限流组件降级次数（Redis 不可用时放行），用于告警排查 */
+    public void rateLimitDegraded(String rule) {
+        meterRegistry.counter("kilikili.rate.degraded", "rule", rule).increment();
+    }
+
     /** 幂等拦截次数，按处理状态区分（PROCESSING/DONE） */
     public void idempotentRejected(String state) {
         meterRegistry.counter("kilikili.idempotent.rejected", "state", state).increment();
